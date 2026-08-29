@@ -1,20 +1,34 @@
 using UnityEngine;
+using AetherRealm;
 
 /// <summary>
-/// A simple interactable object. The player's interaction code
-/// only ever needs to call Interact() — it doesn't need to know
-/// this is a chest specifically, which is the abstraction payoff
-/// of IInteractable.
+/// A treasure chest. Implements <see cref="IInteractable"/> (abstraction) — the
+/// player's interaction code just calls <c>Interact()</c> without knowing this
+/// is a chest. Opens once and showers the player with gold.
 /// </summary>
 public class InteractableChest : MonoBehaviour, IInteractable
 {
-    [SerializeField] private bool isOpen = false;
+    [SerializeField] int gold = 60;
+    bool _open;
 
     public void Interact()
     {
-        if (isOpen) return;
+        if (_open) return;
+        _open = true;
 
-        isOpen = true;
-        Debug.Log("Chest opened! Loot dropped.");
+        var player = GameObject.FindGameObjectWithTag("Player");
+        var pc = player != null ? player.GetComponent<PlayerController>() : null;
+        if (pc != null)
+        {
+            for (int i = 0; i < 6; i++)
+                PickupOrb.Spawn(transform.position + Vector3.up * 0.6f, pc, gold / 6, 0);
+        }
+
+        // pop the lid
+        var lid = transform.Find("Chest_Lid");
+        if (lid != null) lid.localRotation = Quaternion.Euler(-70f, 0f, 0f);
+
+        Effects.Sparks(transform.position + Vector3.up, Palette.Gold, 20);
+        AudioManager.Play(AudioManager.Sound.Coin);
     }
 }

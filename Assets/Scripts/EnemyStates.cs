@@ -1,80 +1,93 @@
 using UnityEngine;
 
-/// <summary>
-/// Enemy stands still until it spots the player, then switches to Chase.
-/// </summary>
-public class IdleState : IEnemyState
+// The three states an enemy can be in. EnemyController just calls
+// Enter / Tick / Exit on whichever one is active - it never has to check
+// "am I chasing or attacking" itself. The same states work for melee and
+// ranged enemies because the attack is chosen by the enemy, not the state.
+
+// Just spawned: stand still for a moment, then start chasing.
+public class SpawnState : IEnemyState
 {
-    public void Enter(EnemyController enemy) { }
-
-    public void Tick(EnemyController enemy)
-    {
-        if (enemy.PlayerTarget != null)
-            enemy.ChangeState(new ChaseState());
-    }
-
-    public void Exit(EnemyController enemy) { }
-}
-
-/// <summary>
-/// Enemy moves toward the player using NavMesh pathfinding until
-/// close enough to attack.
-/// </summary>
-public class ChaseState : IEnemyState
-{
-    private const float attackDistance = 2.2f;
-
-    public void Enter(EnemyController enemy) { }
-
-    public void Tick(EnemyController enemy)
-    {
-        if (enemy.PlayerTarget == null) return;
-
-        enemy.MoveTo(enemy.PlayerTarget.position);
-
-        float distance = Vector3.Distance(enemy.transform.position, enemy.PlayerTarget.position);
-        if (distance <= attackDistance)
-            enemy.ChangeState(new AttackState());
-    }
-
-    public void Exit(EnemyController enemy) { }
-}
-
-/// <summary>
-/// Enemy attacks on a cooldown while in range, and drops back to
-/// Chase if the player moves away.
-/// </summary>
-public class AttackState : IEnemyState
-{
-    private const float cooldown = 1.5f;
-    private const float breakOffDistance = 2.5f;
-    private float timer;
+    float timer;
 
     public void Enter(EnemyController enemy)
     {
-        timer = 0f;
+        timer = 0.8f;
+        enemy.StopMoving();
     }
 
     public void Tick(EnemyController enemy)
     {
-        if (enemy.PlayerTarget == null) return;
+        timer -= Time.deltaTime;
+        if (timer <= 0f)
+        {
+            enemy.ChangeState(new ChaseState());
+        }
+    }
 
-        float distance = Vector3.Distance(enemy.transform.position, enemy.PlayerTarget.position);
-        if (distance > breakOffDistance)
+    public void Exit(EnemyController enemy) { }
+}
+
+// Move towards the player (melee) or get into shooting range (ranged).
+public class ChaseState : IEnemyState
+{
+    public void Enter(EnemyController enemy) { }
+
+    public void Tick(EnemyController enemy)
+    {
+        float distance = enemy.DistanceToPlayer;
+
+        if (enemy.Style == EnemyController.AttackStyle.Ranged)
+        {
+            if (distance > enemy.AttackRange)
+            {
+                enemy.MoveTowardsPlayer();
+            }
+            else if (distance < enemy.AttackRange * 0.5f)
+            {
+                enemy.MoveAwayFromPlayer();
+            }
+            else
+            {
+                enemy.StopMoving();
+                enemy.FacePlayer();
+            }
+        }
+        else
+        {
+            enemy.MoveTowardsPlayer();
+        }
+
+        if (distance <= enemy.AttackRange)
+        {
+            enemy.ChangeState(new AttackState());
+        }
+    }
+
+    public void Exit(EnemyController enemy) { }
+}
+
+// In range: face the player and attack on a cooldown.
+public class AttackState : IEnemyState
+{
+    public void Enter(EnemyController enemy)
+    {
+        enemy.StopMoving();
+    }
+
+    public void Tick(EnemyController enemy)
+    {
+        float distance = enemy.DistanceToPlayer;
+
+        // player ran away - go back to chasing
+        if (distance > enemy.AttackRange + 1f)
         {
             enemy.ChangeState(new ChaseState());
             return;
         }
 
-        timer += Time.deltaTime;
-
-        if (timer >= cooldown &&
-            enemy is MeleeGoblin goblin &&
-            enemy.PlayerTarget.TryGetComponent<IDamageable>(out var target))
-        {
-            goblin.Attack(target);
-            timer = 0f;
-        }
+        enemy.FacePlayer();
+        enemy.TryAttack();
     }
 
     public void Exit(EnemyController enemy) { }

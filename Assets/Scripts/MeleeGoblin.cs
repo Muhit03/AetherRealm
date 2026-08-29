@@ -1,17 +1,36 @@
 using UnityEngine;
+using AetherRealm;
 
 /// <summary>
-/// Inherits generic movement and health from EnemyController and
-/// adds its own melee attack. This is the "derived class" from
-/// the inheritance example: reuses everything from the base
-/// class, adds only what makes this enemy unique.
+/// A melee goblin. Inherits movement, health and death from
+/// <see cref="EnemyController"/> (inheritance) and only adds its own club swing
+/// in the overridden DoAttack (polymorphism).
 /// </summary>
 public class MeleeGoblin : EnemyController
 {
-    [SerializeField] private int attackDamage = 10;
+    public int clubDamage = 9;
 
-    public void Attack(IDamageable target)
+    protected override void Awake()
     {
-        target.TakeDamage(attackDamage);
+        maxHealth = 34;
+        moveSpeed = 3.4f;
+        attackRange = 1.9f;
+        attackCooldown = 1.3f;
+        scoreValue = 10;
+        goldValue = 8;
+        attackStyle = AttackStyle.Melee;
+        base.Awake();
+    }
+
+    protected override Color ClothColor() { return Palette.GoblinCloth; }
+    protected override Color SkinColor() { return Palette.GoblinSkin; }
+    protected override float BodySize() { return 0.82f; }
+    protected override WeaponType Weapon() { return WeaponType.Club; }
+
+    protected override void DoAttack(IDamageable target)
+    {
+        if (animator != null) animator.PlayAttack(0.35f);
+        PushBack(transform.forward, 4f); // small lunge forward
+        target.TakeDamage(ScaledDamage(clubDamage));
     }
 }

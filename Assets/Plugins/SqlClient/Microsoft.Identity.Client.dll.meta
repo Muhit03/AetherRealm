@@ -1,0 +1,20 @@
+fileFormatVersion: 2
+guid: bc15f9436f0b747ba92160bd9cf55645
+PluginImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  iconMap: {}
+  executionOrder: {}
+  defineConstraints: []
+  isPreloaded: 0
+  isOverridable: 0
+  isExplicitlyReferenced: 0
+  validateReferences: 0
+  platformData:
+  - first: {Any: }
+    second: {enabled: 1, settings: {}}
+  - first: {Editor: Editor}
+    second: {enabled: 1, settings: {DefaultValueInitialized: true}}
+  userData:
+  assetBundleName:
+  assetBundleVariant:

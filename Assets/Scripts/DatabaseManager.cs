@@ -1,24 +1,67 @@
+using System;
 using System.Data;
-using System.Data.SqlClient;
+using System.Collections.Generic;
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Data.SqlClient;
 using UnityEngine;
 
 /// <summary>
-/// The bridge between Unity and AetherRealmDB. Every method here
-/// wraps one stored procedure from Step 1, so nowhere else in the
-/// game ever writes raw SQL — gameplay code just calls plain C#
-/// methods like SavePlayerState() or AddItemToInventory().
+/// Connects the game to a Microsoft SQL Server database and calls its stored
+/// procedures with parameterised commands.
 ///
-/// Attach this to one persistent GameObject in your scene (e.g. an
-/// empty object named "DatabaseManager").
+/// If the database can't be reached (server down, or the SQL client isn't
+/// supported on this machine) every method quietly falls back to
+/// <see cref="LocalStore"/> so the game still runs. <see cref="OfflineMode"/>
+/// says which one is in use.
 /// </summary>
 public class DatabaseManager : MonoBehaviour
 {
-    public static DatabaseManager Instance { get; private set; }
+    public static DatabaseManager Instance;
 
-    [Tooltip("Matches the .\\SQLEXPRESS instance and AetherRealmDB you created in Step 1.")]
     [SerializeField]
     private string connectionString =
-        "Server=.\\SQLEXPRESS;Database=AetherRealmDB;Trusted_Connection=True;TrustServerCertificate=True;";
+        "Server=localhost,1433;Database=AetherRealmDB;User Id=SA;Password=AetherRealm@2024;TrustServerCertificate=True;Connect Timeout=3;";
+
+    /// <summary>True once a database call has failed and we've switched to the local fallback.</summary>
+    public static bool OfflineMode { get; private set; }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool SetDllDirectory(string path);
+
+    static DatabaseManager()
+    {
+        // The native SQL Server networking library (Microsoft.Data.SqlClient.SNI.dll)
+        // lives in the Plugins folder. Tell Windows where to find it.
+        try
+        {
+            string[] folders =
+            {
+                Path.Combine(Application.dataPath, "Plugins", "SqlClient"),
+                Path.Combine(Application.dataPath, "Plugins"),
+                Path.GetDirectoryName(Application.dataPath), // build: next to the exe
+            };
+            foreach (string folder in folders)
+            {
+                if (folder != null && Directory.Exists(folder) &&
+                    File.Exists(Path.Combine(folder, "Microsoft.Data.SqlClient.SNI.arm64.dll")))
+                {
+                    SetDllDirectory(folder);
+                    return;
+                }
+            }
+            // fall back to the plugins folder even if we didn't spot the SNI file
+            string plugins = Path.Combine(Application.dataPath, "Plugins", "SqlClient");
+            if (Directory.Exists(plugins))
+            {
+                SetDllDirectory(plugins);
+            }
+        }
+        catch (Exception error)
+        {
+            Debug.LogWarning("Could not set the SQL native library path: " + error.Message);
+        }
+    }
 
     private void Awake()
     {
@@ -27,7 +70,6 @@ public class DatabaseManager : MonoBehaviour
             Destroy(gameObject);
             return;
         }
-
         Instance = this;
         DontDestroyOnLoad(gameObject);
     }
@@ -37,124 +79,304 @@ public class DatabaseManager : MonoBehaviour
         return new SqlConnection(connectionString);
     }
 
-    /// <summary>Creates a new player row and returns its generated PlayerId.</summary>
-    public int CreatePlayer(string username)
+    // Called once from a catch block the first time SQL fails.
+    private static void GoOffline(Exception error)
     {
-        using (var conn = GetConnection())
-        using (var cmd = new SqlCommand("sp_CreatePlayer", conn))
+        if (!OfflineMode)
         {
-            cmd.CommandType = CommandType.StoredProcedure;
-            cmd.Parameters.AddWithValue("@Username", username);
-
-            var outputParam = new SqlParameter("@NewPlayerId", SqlDbType.Int)
-            {
-                Direction = ParameterDirection.Output
-            };
-            cmd.Parameters.Add(outputParam);
-
-            conn.Open();
-            cmd.ExecuteNonQuery();
-
-            return (int)outputParam.Value;
+            OfflineMode = true;
+            Debug.LogWarning("Database unavailable, using local save instead. (" + error.Message + ")");
         }
     }
 
-    /// <summary>Saves level, stats, and position in one transactional call.</summary>
-    public void SavePlayerState(int playerId, int level, int experience, int gold,
-        int health, int maxHealth, Vector3 position, int districtId)
+    // ---- accounts ----
+    public int RegisterPlayer(string username, string passwordHash, string classType)
     {
-        using (var conn = GetConnection())
-        using (var cmd = new SqlCommand("sp_SavePlayerState", conn))
+        if (OfflineMode)
         {
-            cmd.CommandType = CommandType.StoredProcedure;
-            cmd.Parameters.AddWithValue("@PlayerId", playerId);
-            cmd.Parameters.AddWithValue("@Level", level);
-            cmd.Parameters.AddWithValue("@Experience", experience);
-            cmd.Parameters.AddWithValue("@Gold", gold);
-            cmd.Parameters.AddWithValue("@Health", health);
-            cmd.Parameters.AddWithValue("@MaxHealth", maxHealth);
-            cmd.Parameters.AddWithValue("@PosX", position.x);
-            cmd.Parameters.AddWithValue("@PosY", position.y);
-            cmd.Parameters.AddWithValue("@PosZ", position.z);
-            cmd.Parameters.AddWithValue("@DistrictId", districtId);
-
-            conn.Open();
-            cmd.ExecuteNonQuery();
-            Debug.Log($"Saved player {playerId} to the database.");
+            return LocalStore.RegisterPlayer(username, passwordHash, classType);
         }
-    }
-
-    /// <summary>Loads a player's saved state. Returns false if no row was found.</summary>
-    public bool LoadPlayerState(int playerId, out PlayerSaveData data)
-    {
-        data = default;
-
-        using (var conn = GetConnection())
-        using (var cmd = new SqlCommand("sp_LoadPlayerState", conn))
+        try
         {
-            cmd.CommandType = CommandType.StoredProcedure;
-            cmd.Parameters.AddWithValue("@PlayerId", playerId);
-
-            conn.Open();
-            using (var reader = cmd.ExecuteReader())
+            using (SqlConnection conn = GetConnection())
+            using (SqlCommand cmd = new SqlCommand("sp_RegisterPlayer", conn))
             {
-                if (!reader.Read())
-                    return false;
+                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.Parameters.AddWithValue("@Username", username);
+                cmd.Parameters.AddWithValue("@PasswordHash", passwordHash);
+                cmd.Parameters.AddWithValue("@ClassType", classType);
 
-                data = new PlayerSaveData
-                {
-                    PlayerId = reader.GetInt32(reader.GetOrdinal("PlayerId")),
-                    Username = reader.GetString(reader.GetOrdinal("Username")),
-                    Level = reader.GetInt32(reader.GetOrdinal("Level")),
-                    Experience = reader.GetInt32(reader.GetOrdinal("Experience")),
-                    Gold = reader.GetInt32(reader.GetOrdinal("Gold")),
-                    Health = reader.GetInt32(reader.GetOrdinal("Health")),
-                    MaxHealth = reader.GetInt32(reader.GetOrdinal("MaxHealth")),
-                    Position = new Vector3(
-                        (float)reader.GetDouble(reader.GetOrdinal("PosX")),
-                        (float)reader.GetDouble(reader.GetOrdinal("PosY")),
-                        (float)reader.GetDouble(reader.GetOrdinal("PosZ")))
-                };
+                SqlParameter newId = new SqlParameter("@NewPlayerId", SqlDbType.Int);
+                newId.Direction = ParameterDirection.Output;
+                cmd.Parameters.Add(newId);
 
-                return true;
+                conn.Open();
+                cmd.ExecuteNonQuery();
+                return Convert.ToInt32(newId.Value);
             }
         }
-    }
-
-    /// <summary>Adds an item to a player's inventory, stacking if they already have it.</summary>
-    public void AddItemToInventory(int playerId, int itemId, int quantity = 1)
-    {
-        using (var conn = GetConnection())
-        using (var cmd = new SqlCommand("sp_AddItemToInventory", conn))
+        catch (Exception error)
         {
-            cmd.CommandType = CommandType.StoredProcedure;
-            cmd.Parameters.AddWithValue("@PlayerId", playerId);
-            cmd.Parameters.AddWithValue("@ItemId", itemId);
-            cmd.Parameters.AddWithValue("@Quantity", quantity);
-
-            conn.Open();
-            cmd.ExecuteNonQuery();
+            GoOffline(error);
+            return LocalStore.RegisterPlayer(username, passwordHash, classType);
         }
     }
 
-    /// <summary>Removes/consumes an item from a player's inventory.</summary>
+    public int LoginPlayer(string username, string passwordHash, out string classType)
+    {
+        classType = "Warrior";
+        if (OfflineMode)
+        {
+            return LocalStore.LoginPlayer(username, passwordHash, out classType);
+        }
+        try
+        {
+            using (SqlConnection conn = GetConnection())
+            using (SqlCommand cmd = new SqlCommand("sp_LoginPlayer", conn))
+            {
+                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.Parameters.AddWithValue("@Username", username);
+                cmd.Parameters.AddWithValue("@PasswordHash", passwordHash);
+
+                SqlParameter outId = new SqlParameter("@PlayerId", SqlDbType.Int);
+                outId.Direction = ParameterDirection.Output;
+                cmd.Parameters.Add(outId);
+
+                SqlParameter outClass = new SqlParameter("@ClassType", SqlDbType.NVarChar, 20);
+                outClass.Direction = ParameterDirection.Output;
+                cmd.Parameters.Add(outClass);
+
+                conn.Open();
+                cmd.ExecuteNonQuery();
+
+                if (outClass.Value != DBNull.Value && outClass.Value != null)
+                {
+                    classType = outClass.Value.ToString();
+                }
+                return Convert.ToInt32(outId.Value);
+            }
+        }
+        catch (Exception error)
+        {
+            GoOffline(error);
+            return LocalStore.LoginPlayer(username, passwordHash, out classType);
+        }
+    }
+
+    public int CreatePlayer(string username)
+    {
+        try
+        {
+            using (SqlConnection conn = GetConnection())
+            using (SqlCommand cmd = new SqlCommand("sp_CreatePlayer", conn))
+            {
+                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.Parameters.AddWithValue("@Username", username);
+
+                SqlParameter newId = new SqlParameter("@NewPlayerId", SqlDbType.Int);
+                newId.Direction = ParameterDirection.Output;
+                cmd.Parameters.Add(newId);
+
+                conn.Open();
+                cmd.ExecuteNonQuery();
+                return Convert.ToInt32(newId.Value);
+            }
+        }
+        catch (Exception error)
+        {
+            GoOffline(error);
+            return LocalStore.RegisterPlayer(username, "", "Warrior");
+        }
+    }
+
+    // ---- player state ----
+    public void SavePlayerState(int playerId, int level, int experience, int gold, int health,
+        int maxHealth, Vector3 position, int districtId)
+    {
+        try
+        {
+            using (SqlConnection conn = GetConnection())
+            using (SqlCommand cmd = new SqlCommand("sp_SavePlayerState", conn))
+            {
+                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.Parameters.AddWithValue("@PlayerId", playerId);
+                cmd.Parameters.AddWithValue("@Level", level);
+                cmd.Parameters.AddWithValue("@Experience", experience);
+                cmd.Parameters.AddWithValue("@Gold", gold);
+                cmd.Parameters.AddWithValue("@Health", health);
+                cmd.Parameters.AddWithValue("@MaxHealth", maxHealth);
+                cmd.Parameters.AddWithValue("@PosX", position.x);
+                cmd.Parameters.AddWithValue("@PosY", position.y);
+                cmd.Parameters.AddWithValue("@PosZ", position.z);
+                cmd.Parameters.AddWithValue("@DistrictId", districtId);
+
+                conn.Open();
+                cmd.ExecuteNonQuery();
+            }
+        }
+        catch (Exception error)
+        {
+            GoOffline(error);
+            LocalStore.SavePlayerState(playerId, gold, health, maxHealth);
+        }
+    }
+
+    public bool LoadPlayerState(int playerId, out PlayerSaveData data)
+    {
+        data = new PlayerSaveData();
+        try
+        {
+            using (SqlConnection conn = GetConnection())
+            using (SqlCommand cmd = new SqlCommand("sp_LoadPlayerState", conn))
+            {
+                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.Parameters.AddWithValue("@PlayerId", playerId);
+
+                conn.Open();
+                using (SqlDataReader reader = cmd.ExecuteReader())
+                {
+                    if (!reader.Read())
+                    {
+                        return false;
+                    }
+
+                    data.PlayerId = reader.GetInt32(reader.GetOrdinal("PlayerId"));
+                    data.Username = reader.GetString(reader.GetOrdinal("Username"));
+                    data.Level = reader.GetInt32(reader.GetOrdinal("Level"));
+                    data.Experience = reader.GetInt32(reader.GetOrdinal("Experience"));
+                    data.Gold = reader.GetInt32(reader.GetOrdinal("Gold"));
+                    data.Health = reader.GetInt32(reader.GetOrdinal("Health"));
+                    data.MaxHealth = reader.GetInt32(reader.GetOrdinal("MaxHealth"));
+
+                    float x = (float)reader.GetDouble(reader.GetOrdinal("PosX"));
+                    float y = (float)reader.GetDouble(reader.GetOrdinal("PosY"));
+                    float z = (float)reader.GetDouble(reader.GetOrdinal("PosZ"));
+                    data.Position = new Vector3(x, y, z);
+                    return true;
+                }
+            }
+        }
+        catch (Exception error)
+        {
+            GoOffline(error);
+            return false; // offline: start fresh
+        }
+    }
+
+    // ---- inventory (kept for the course; not used by the survival loop) ----
+    public void AddItemToInventory(int playerId, int itemId, int quantity = 1)
+    {
+        try
+        {
+            using (SqlConnection conn = GetConnection())
+            using (SqlCommand cmd = new SqlCommand("sp_AddItemToInventory", conn))
+            {
+                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.Parameters.AddWithValue("@PlayerId", playerId);
+                cmd.Parameters.AddWithValue("@ItemId", itemId);
+                cmd.Parameters.AddWithValue("@Quantity", quantity);
+                conn.Open();
+                cmd.ExecuteNonQuery();
+            }
+        }
+        catch (Exception error)
+        {
+            GoOffline(error);
+        }
+    }
+
     public void RemoveItemFromInventory(int playerId, int itemId, int quantity = 1)
     {
-        using (var conn = GetConnection())
-        using (var cmd = new SqlCommand("sp_RemoveItemFromInventory", conn))
+        try
         {
-            cmd.CommandType = CommandType.StoredProcedure;
-            cmd.Parameters.AddWithValue("@PlayerId", playerId);
-            cmd.Parameters.AddWithValue("@ItemId", itemId);
-            cmd.Parameters.AddWithValue("@Quantity", quantity);
+            using (SqlConnection conn = GetConnection())
+            using (SqlCommand cmd = new SqlCommand("sp_RemoveItemFromInventory", conn))
+            {
+                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.Parameters.AddWithValue("@PlayerId", playerId);
+                cmd.Parameters.AddWithValue("@ItemId", itemId);
+                cmd.Parameters.AddWithValue("@Quantity", quantity);
+                conn.Open();
+                cmd.ExecuteNonQuery();
+            }
+        }
+        catch (Exception error)
+        {
+            GoOffline(error);
+        }
+    }
 
-            conn.Open();
-            cmd.ExecuteNonQuery();
+    // ---- leaderboard ----
+    public void SaveScore(int playerId, int score, int kills, int playTimeSecs)
+    {
+        if (OfflineMode)
+        {
+            LocalStore.SaveScore(AuthManager.CurrentUsername, AuthManager.CurrentClassType, score, kills, playTimeSecs);
+            return;
+        }
+        try
+        {
+            using (SqlConnection conn = GetConnection())
+            using (SqlCommand cmd = new SqlCommand("sp_SaveScore", conn))
+            {
+                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.Parameters.AddWithValue("@PlayerId", playerId);
+                cmd.Parameters.AddWithValue("@Score", score);
+                cmd.Parameters.AddWithValue("@Kills", kills);
+                cmd.Parameters.AddWithValue("@PlayTimeSecs", playTimeSecs);
+                conn.Open();
+                cmd.ExecuteNonQuery();
+            }
+        }
+        catch (Exception error)
+        {
+            GoOffline(error);
+            LocalStore.SaveScore(AuthManager.CurrentUsername, AuthManager.CurrentClassType, score, kills, playTimeSecs);
+        }
+    }
+
+    public List<LeaderboardEntry> GetLeaderboard()
+    {
+        if (OfflineMode)
+        {
+            return LocalStore.GetLeaderboard();
+        }
+
+        List<LeaderboardEntry> entries = new List<LeaderboardEntry>();
+        try
+        {
+            using (SqlConnection conn = GetConnection())
+            using (SqlCommand cmd = new SqlCommand("sp_GetLeaderboard", conn))
+            {
+                cmd.CommandType = CommandType.StoredProcedure;
+                conn.Open();
+
+                using (SqlDataReader reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        LeaderboardEntry entry = new LeaderboardEntry();
+                        entry.Rank = reader.GetInt32(reader.GetOrdinal("Rank"));
+                        entry.Username = reader.GetString(reader.GetOrdinal("Username"));
+                        entry.ClassType = reader.GetString(reader.GetOrdinal("ClassType"));
+                        entry.Score = reader.GetInt32(reader.GetOrdinal("Score"));
+                        entry.Kills = reader.GetInt32(reader.GetOrdinal("Kills"));
+                        entry.PlayTimeSecs = reader.GetInt32(reader.GetOrdinal("PlayTimeSecs"));
+                        entries.Add(entry);
+                    }
+                }
+            }
+            return entries;
+        }
+        catch (Exception error)
+        {
+            GoOffline(error);
+            return LocalStore.GetLeaderboard();
         }
     }
 }
 
-/// <summary>Plain data returned by LoadPlayerState — mirrors the Players table.</summary>
+// Structs for player save data and leaderboard entries
 [System.Serializable]
 public struct PlayerSaveData
 {
@@ -166,4 +388,15 @@ public struct PlayerSaveData
     public int Health;
     public int MaxHealth;
     public Vector3 Position;
+}
+
+[System.Serializable]
+public struct LeaderboardEntry
+{
+    public int Rank;
+    public string Username;
+    public string ClassType;
+    public int Score;
+    public int Kills;
+    public int PlayTimeSecs;
 }
