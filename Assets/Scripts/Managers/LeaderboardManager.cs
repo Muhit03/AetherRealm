@@ -2,12 +2,14 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-// Handles loading leaderboard data from the database
+// Loads the leaderboard from the database (or the local fallback) and caches it
+// so the panel can ask for it without hitting the database every frame.
 public class LeaderboardManager : MonoBehaviour
 {
     public static LeaderboardManager Instance;
 
     private List<LeaderboardEntry> cachedEntries = new List<LeaderboardEntry>();
+    private string cachedSort = "";
     private bool isFetching = false;
 
     private void Awake()
@@ -22,7 +24,8 @@ public class LeaderboardManager : MonoBehaviour
         DontDestroyOnLoad(gameObject);
     }
 
-    public void Refresh()
+    // sortBy: "score" | "waves" | "kills" | "damage"
+    public void Refresh(string sortBy)
     {
         if (isFetching || DatabaseManager.Instance == null)
         {
@@ -30,21 +33,26 @@ public class LeaderboardManager : MonoBehaviour
         }
 
         isFetching = true;
-
         try
         {
-            cachedEntries = DatabaseManager.Instance.GetLeaderboard();
-            Debug.Log("Fetched " + cachedEntries.Count + " leaderboard entries.");
+            cachedEntries = DatabaseManager.Instance.GetLeaderboard(sortBy);
+            cachedSort = sortBy;
         }
         catch (Exception ex)
         {
-            Debug.LogError("Failed to fetch leaderboard: " + ex.Message);
+            Debug.LogWarning("Could not load the leaderboard: " + ex.Message);
             cachedEntries = new List<LeaderboardEntry>();
         }
         finally
         {
             isFetching = false;
         }
+    }
+
+    // Used by GameManager after a run - just refresh the default view.
+    public void Refresh()
+    {
+        Refresh("score");
     }
 
     public List<LeaderboardEntry> GetCachedEntries()

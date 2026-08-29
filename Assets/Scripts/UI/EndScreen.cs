@@ -34,16 +34,19 @@ public class EndScreen : MonoBehaviour
         UIFactory.At((RectTransform)b.transform, new Vector2(0.5f, 0.42f), new Vector2(0f, y), new Vector2(420f, 76f));
     }
 
-    public void Show(bool victory, int score, int kills, int wave)
+    public void Show(bool victory, int score, int kills, int wavesCleared)
     {
         gameObject.SetActive(true);
         _title.text = victory ? "VICTORY" : "YOU FELL";
         _title.color = victory ? UIFactory.Accent : new Color(0.85f, 0.3f, 0.3f);
-        int t = GameManager.Instance != null ? GameManager.Instance.SecondsPlayed : 0;
+
+        int seconds = GameManager.Instance != null ? GameManager.Instance.SecondsPlayed : 0;
+        int damage = GameManager.Instance != null ? GameManager.Instance.DamageDealt : 0;
+
         _summary.text =
             $"Final Score   <b>{score}</b>\n" +
-            $"Kills   <b>{kills}</b>          Reached   <b>Wave {Mathf.Max(1, wave)}</b>\n" +
-            $"Time Survived   <b>{t / 60:00}:{t % 60:00}</b>\n\n" +
-            (AuthManager.IsLoggedIn ? "Score submitted to the leaderboard." : "");
+            $"Waves Cleared   <b>{wavesCleared}</b>          Kills   <b>{kills}</b>\n" +
+            $"Damage Dealt   <b>{damage}</b>          Time   <b>{seconds / 60:00}:{seconds % 60:00}</b>\n\n" +
+            (AuthManager.IsLoggedIn ? "Run saved to the leaderboard." : "");
     }
 }

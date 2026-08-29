@@ -35,6 +35,8 @@ public class HUDController : MonoBehaviour
     Color centerColor = Color.white;
     float centerTimer;
 
+    PlayerController cachedPlayer;
+
     void Awake()
     {
         if (Instance != null && Instance != this)
@@ -154,14 +156,18 @@ public class HUDController : MonoBehaviour
             centerText.color = new Color(centerColor.r, centerColor.g, centerColor.b, alpha);
         }
 
-        // keep the live bars (stamina / ability / mana) in sync each frame
-        GameObject playerObject = GameObject.FindGameObjectWithTag("Player");
-        if (playerObject == null)
+        // keep the live bars (stamina / ability / mana) in sync each frame.
+        // Look the player up once and remember it instead of searching every frame.
+        if (cachedPlayer == null)
         {
-            return;
+            GameObject playerObject = GameObject.FindGameObjectWithTag("Player");
+            if (playerObject != null)
+            {
+                cachedPlayer = playerObject.GetComponent<PlayerController>();
+            }
         }
 
-        PlayerController player = playerObject.GetComponent<PlayerController>();
+        PlayerController player = cachedPlayer;
         if (player == null)
         {
             return;

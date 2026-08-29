@@ -6,12 +6,14 @@ using UnityEngine.AI;
 namespace AetherRealm
 {
     // Holds the important spots in the arena so other scripts know where to
-    // place the player, the NPC and where enemies should appear.
+    // place the player and the NPC, where enemies appear, and where the cover
+    // walls are (the archers hide behind these).
     public class ArenaLayout
     {
         public Vector3 playerStart = new Vector3(0f, 1f, -6f);
         public Vector3 npcPoint = new Vector3(-9f, 0f, 9f);
-        public List<Transform> spawnPoints = new List<Transform>();
+        public List<Vector3> spawnPoints = new List<Vector3>();
+        public List<Vector3> coverPoints = new List<Vector3>();
     }
 
     // Builds the whole play area from primitives when the game starts, then
@@ -28,7 +30,7 @@ namespace AetherRealm
             BuildFloor(root.transform);
             BuildOuterWalls(root.transform);
             BuildPillarsAndTorches(root.transform);
-            BuildCover(root.transform);
+            BuildCover(root.transform, layout);
             BuildSpawnPortals(root.transform, layout);
 
             BakeNavMesh(root);
@@ -71,10 +73,10 @@ namespace AetherRealm
         {
             Vector3[] corners =
             {
-                new Vector3(15f, 0f, 15f),
-                new Vector3(-15f, 0f, 15f),
-                new Vector3(15f, 0f, -15f),
-                new Vector3(-15f, 0f, -15f)
+                new Vector3(13f, 0f, 13f),
+                new Vector3(-13f, 0f, 13f),
+                new Vector3(13f, 0f, -13f),
+                new Vector3(-13f, 0f, -13f)
             };
 
             foreach (Vector3 corner in corners)
@@ -90,14 +92,17 @@ namespace AetherRealm
             }
         }
 
-        static void BuildCover(Transform parent)
+        static void BuildCover(Transform parent, ArenaLayout layout)
         {
+            // Low walls scattered around the middle. Archers duck behind these.
             Vector3[] spots =
             {
-                new Vector3(8f, 0.75f, 3f),
-                new Vector3(-8f, 0.75f, -3f),
-                new Vector3(4f, 0.75f, -9f),
-                new Vector3(-5f, 0.75f, 8f)
+                new Vector3(7f, 0.9f, 4f),
+                new Vector3(-7f, 0.9f, -4f),
+                new Vector3(5f, 0.9f, -8f),
+                new Vector3(-5f, 0.9f, 8f),
+                new Vector3(0f, 0.9f, 10f),
+                new Vector3(0f, 0.9f, -10f)
             };
 
             foreach (Vector3 spot in spots)
@@ -106,20 +111,23 @@ namespace AetherRealm
                 block.name = "CoverWall";
                 block.transform.SetParent(parent);
                 block.transform.position = spot;
-                block.transform.localScale = new Vector3(3f, 1.5f, 1f);
+                block.transform.localScale = new Vector3(3.5f, 1.8f, 1f);
                 block.transform.rotation = Quaternion.Euler(0f, Random.Range(0f, 180f), 0f);
                 block.GetComponent<Renderer>().sharedMaterial = Palette.Material(Palette.StoneDark);
+
+                layout.coverPoints.Add(spot);
             }
         }
 
         static void BuildSpawnPortals(Transform parent, ArenaLayout layout)
         {
+            // Kept well inside the walls so the enemies land on the baked NavMesh.
             Vector3[] positions =
             {
-                new Vector3(0f, 0f, 20f),
-                new Vector3(0f, 0f, -20f),
-                new Vector3(20f, 0f, 0f),
-                new Vector3(-20f, 0f, 0f)
+                new Vector3(0f, 0f, 17f),
+                new Vector3(0f, 0f, -17f),
+                new Vector3(17f, 0f, 0f),
+                new Vector3(-17f, 0f, 0f)
             };
 
             foreach (Vector3 position in positions)
@@ -143,7 +151,7 @@ namespace AetherRealm
                 light.range = 7f;
                 light.intensity = 1.5f;
 
-                layout.spawnPoints.Add(portal.transform);
+                layout.spawnPoints.Add(position);
             }
         }
 

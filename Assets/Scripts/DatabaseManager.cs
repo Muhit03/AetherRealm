@@ -307,11 +307,11 @@ public class DatabaseManager : MonoBehaviour
     }
 
     // ---- leaderboard ----
-    public void SaveScore(int playerId, int score, int kills, int playTimeSecs)
+    public void SaveScore(int playerId, int score, int kills, int waves, int damage, int playTimeSecs)
     {
         if (OfflineMode)
         {
-            LocalStore.SaveScore(AuthManager.CurrentUsername, AuthManager.CurrentClassType, score, kills, playTimeSecs);
+            LocalStore.SaveScore(AuthManager.CurrentUsername, AuthManager.CurrentClassType, score, kills, waves, damage, playTimeSecs);
             return;
         }
         try
@@ -323,6 +323,8 @@ public class DatabaseManager : MonoBehaviour
                 cmd.Parameters.AddWithValue("@PlayerId", playerId);
                 cmd.Parameters.AddWithValue("@Score", score);
                 cmd.Parameters.AddWithValue("@Kills", kills);
+                cmd.Parameters.AddWithValue("@Waves", waves);
+                cmd.Parameters.AddWithValue("@Damage", damage);
                 cmd.Parameters.AddWithValue("@PlayTimeSecs", playTimeSecs);
                 conn.Open();
                 cmd.ExecuteNonQuery();
@@ -331,15 +333,16 @@ public class DatabaseManager : MonoBehaviour
         catch (Exception error)
         {
             GoOffline(error);
-            LocalStore.SaveScore(AuthManager.CurrentUsername, AuthManager.CurrentClassType, score, kills, playTimeSecs);
+            LocalStore.SaveScore(AuthManager.CurrentUsername, AuthManager.CurrentClassType, score, kills, waves, damage, playTimeSecs);
         }
     }
 
-    public List<LeaderboardEntry> GetLeaderboard()
+    // sortBy: "score" | "waves" | "kills" | "damage"
+    public List<LeaderboardEntry> GetLeaderboard(string sortBy)
     {
         if (OfflineMode)
         {
-            return LocalStore.GetLeaderboard();
+            return LocalStore.GetLeaderboard(sortBy);
         }
 
         List<LeaderboardEntry> entries = new List<LeaderboardEntry>();
@@ -349,6 +352,7 @@ public class DatabaseManager : MonoBehaviour
             using (SqlCommand cmd = new SqlCommand("sp_GetLeaderboard", conn))
             {
                 cmd.CommandType = CommandType.StoredProcedure;
+                cmd.Parameters.AddWithValue("@SortBy", sortBy);
                 conn.Open();
 
                 using (SqlDataReader reader = cmd.ExecuteReader())
@@ -360,8 +364,10 @@ public class DatabaseManager : MonoBehaviour
                         entry.Username = reader.GetString(reader.GetOrdinal("Username"));
                         entry.ClassType = reader.GetString(reader.GetOrdinal("ClassType"));
                         entry.Score = reader.GetInt32(reader.GetOrdinal("Score"));
+                        entry.Waves = reader.GetInt32(reader.GetOrdinal("Waves"));
                         entry.Kills = reader.GetInt32(reader.GetOrdinal("Kills"));
-                        entry.PlayTimeSecs = reader.GetInt32(reader.GetOrdinal("PlayTimeSecs"));
+                        entry.Damage = reader.GetInt32(reader.GetOrdinal("Damage"));
+                        entry.Games = reader.GetInt32(reader.GetOrdinal("Games"));
                         entries.Add(entry);
                     }
                 }
@@ -371,7 +377,7 @@ public class DatabaseManager : MonoBehaviour
         catch (Exception error)
         {
             GoOffline(error);
-            return LocalStore.GetLeaderboard();
+            return LocalStore.GetLeaderboard(sortBy);
         }
     }
 }
@@ -397,6 +403,8 @@ public struct LeaderboardEntry
     public string Username;
     public string ClassType;
     public int Score;
+    public int Waves;
     public int Kills;
-    public int PlayTimeSecs;
+    public int Damage;
+    public int Games;     // how many runs this player has finished
 }

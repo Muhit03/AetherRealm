@@ -2,24 +2,25 @@ using UnityEngine;
 using AetherRealm;
 
 /// <summary>
-/// A ranged archer. Inherits from <see cref="EnemyController"/> (inheritance),
-/// keeps its distance because of the Ranged attack style, and fires an arrow
-/// projectile in its overridden DoAttack (polymorphism).
+/// A ranged archer. Inherits from <see cref="EnemyController"/> (inheritance).
+/// Its <c>Sniper</c> behaviour makes it hide behind cover, only shoot when it
+/// has a clear line to the player, and flee when the player closes in. The
+/// arrow itself is fired in the overridden DoAttack (polymorphism).
 /// </summary>
 public class RangedArcher : EnemyController
 {
     public int arrowDamage = 7;
-    public float arrowSpeed = 18f;
+    public float arrowSpeed = 20f;
 
     protected override void Awake()
     {
-        maxHealth = 24;
-        moveSpeed = 3f;
-        attackRange = 11f;
-        attackCooldown = 2f;
+        maxHealth = 22;
+        moveSpeed = 3.4f;
+        attackRange = 14f;
+        attackCooldown = 1.8f;
         scoreValue = 20;
         goldValue = 14;
-        attackStyle = AttackStyle.Ranged;
+        behaviour = Behaviour.Sniper;
         base.Awake();
     }
 
@@ -30,15 +31,16 @@ public class RangedArcher : EnemyController
 
     protected override void DoAttack(IDamageable target)
     {
-        if (animator != null) animator.PlayCast(0.4f);
+        if (animator != null) animator.PlayCast(0.35f);
         if (Player == null)
         {
             return;
         }
 
-        Vector3 start = transform.position + Vector3.up + transform.forward * 0.5f;
+        Vector3 start = EyePosition + transform.forward * 0.5f;
         Vector3 direction = (Player.position + Vector3.up * 0.8f - start).normalized;
         Projectile.Spawn(start, direction, Projectile.Side.Enemy, ScaledDamage(arrowDamage), arrowSpeed,
             new Color(0.9f, 0.8f, 0.5f), gameObject);
+        AudioManager.Play(AudioManager.Sound.Swing);
     }
 }

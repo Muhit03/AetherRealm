@@ -67,17 +67,27 @@ CREATE TABLE dbo.PlayerInventory
 );
 GO
 
--- Leaderboard: one score row per session
+-- Leaderboard: one row per finished run
 IF OBJECT_ID('dbo.Leaderboard', 'U') IS NULL
 CREATE TABLE dbo.Leaderboard
 (
     EntryId      INT       IDENTITY(1,1) PRIMARY KEY,
     PlayerId     INT       NOT NULL REFERENCES dbo.Players(PlayerId) ON DELETE CASCADE,
     Score        INT       NOT NULL DEFAULT 0,
+    Waves        INT       NOT NULL DEFAULT 0,  -- waves fully cleared
     Kills        INT       NOT NULL DEFAULT 0,
+    Damage       INT       NOT NULL DEFAULT 0,  -- total damage the player dealt
     PlayTimeSecs INT       NOT NULL DEFAULT 0,  -- seconds survived
     RecordedAt   DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
 );
+GO
+
+-- If the table already existed from an older version, add the new columns.
+IF COL_LENGTH('dbo.Leaderboard', 'Waves') IS NULL
+    ALTER TABLE dbo.Leaderboard ADD Waves INT NOT NULL DEFAULT 0;
+GO
+IF COL_LENGTH('dbo.Leaderboard', 'Damage') IS NULL
+    ALTER TABLE dbo.Leaderboard ADD Damage INT NOT NULL DEFAULT 0;
 GO
 
 -- ── 2. STORED PROCEDURES ──────────────────────────────────────
@@ -253,40 +263,65 @@ BEGIN
 END
 GO
 
--- sp_SaveScore  —  insert a leaderboard entry at session end
+-- sp_SaveScore  —  insert one leaderboard row at the end of a run
 IF OBJECT_ID('dbo.sp_SaveScore', 'P') IS NOT NULL DROP PROCEDURE dbo.sp_SaveScore;
 GO
 CREATE PROCEDURE dbo.sp_SaveScore
     @PlayerId     INT,
     @Score        INT,
     @Kills        INT,
+    @Waves        INT,
+    @Damage       INT,
     @PlayTimeSecs INT
 AS
 BEGIN
     SET NOCOUNT ON;
-    INSERT INTO dbo.Leaderboard (PlayerId, Score, Kills, PlayTimeSecs)
-    VALUES (@PlayerId, @Score, @Kills, @PlayTimeSecs);
+    INSERT INTO dbo.Leaderboard (PlayerId, Score, Waves, Kills, Damage, PlayTimeSecs)
+    VALUES (@PlayerId, @Score, @Waves, @Kills, @Damage, @PlayTimeSecs);
 END
 GO
 
--- sp_GetLeaderboard  —  top 10 all-time scores
+-- sp_GetLeaderboard  —  one row per player showing their best of each stat.
+-- @SortBy picks which column the table is ordered by.
 IF OBJECT_ID('dbo.sp_GetLeaderboard', 'P') IS NOT NULL DROP PROCEDURE dbo.sp_GetLeaderboard;
 GO
 CREATE PROCEDURE dbo.sp_GetLeaderboard
+    @SortBy NVARCHAR(20) = 'score'   -- score | waves | kills | damage
 AS
 BEGIN
     SET NOCOUNT ON;
-    SELECT TOP 10
-           ROW_NUMBER() OVER (ORDER BY lb.Score DESC) AS Rank,
-           p.Username,
-           p.ClassType,
-           lb.Score,
-           lb.Kills,
-           lb.PlayTimeSecs,
-           lb.RecordedAt
-    FROM   dbo.Leaderboard lb
-    JOIN   dbo.Players      p  ON p.PlayerId = lb.PlayerId
-    ORDER BY lb.Score DESC;
+
+    ;WITH PlayerBest AS
+    (
+        SELECT p.PlayerId,
+               p.Username,
+               p.ClassType,
+               MAX(lb.Score)  AS Score,
+               MAX(lb.Waves)  AS Waves,
+               MAX(lb.Kills)  AS Kills,
+               MAX(lb.Damage) AS Damage,
+               COUNT(*)       AS Games
+        FROM   dbo.Players     p
+        JOIN   dbo.Leaderboard lb ON lb.PlayerId = p.PlayerId
+        GROUP BY p.PlayerId, p.Username, p.ClassType
+    )
+    SELECT TOP 20
+           ROW_NUMBER() OVER (ORDER BY
+               CASE @SortBy
+                   WHEN 'waves'  THEN Waves
+                   WHEN 'kills'  THEN Kills
+                   WHEN 'damage' THEN Damage
+                   ELSE Score
+               END DESC) AS Rank,
+           Username,
+           ClassType,
+           Score,
+           Waves,
+           Kills,
+           Damage,
+           Games
+    FROM   PlayerBest
+    ORDER BY Rank;
 END
 GO
 

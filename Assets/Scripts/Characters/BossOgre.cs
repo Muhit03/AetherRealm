@@ -2,24 +2,26 @@ using UnityEngine;
 using AetherRealm;
 
 /// <summary>
-/// The wave-8 boss. Inherits the whole enemy system (inheritance), swings for a
-/// big area slam in its overridden DoAttack, and triggers the win screen in its
-/// overridden OnDeath (polymorphism).
+/// The wave-8 boss. Inherits the whole enemy system (inheritance), uses the
+/// melee approach/attack states like a grunt but never blocks or staggers,
+/// hits with a big area slam in the overridden DoAttack, and triggers the win
+/// screen in the overridden OnDeath (polymorphism).
 /// </summary>
 public class BossOgre : EnemyController
 {
-    public int slamDamage = 20;
+    public int slamDamage = 18;
     public float slamRadius = 4f;
 
     protected override void Awake()
     {
-        maxHealth = 900;
-        moveSpeed = 2.6f;
+        maxHealth = 850;
+        moveSpeed = 2.7f;
         attackRange = 3.4f;
-        attackCooldown = 2.2f;
+        attackCooldown = 2f;
         scoreValue = 500;
         goldValue = 250;
-        attackStyle = AttackStyle.Melee;
+        behaviour = Behaviour.Boss;
+        blockChance = 0f;
         base.Awake();
     }
 
@@ -56,9 +58,10 @@ public class BossOgre : EnemyController
     {
         if (animator != null) animator.PlayAttack(0.6f);
 
-        foreach (Collider hit in Physics.OverlapSphere(transform.position, slamRadius))
+        int count = CombatUtil.OverlapSphere(transform.position, slamRadius);
+        for (int i = 0; i < count; i++)
         {
-            PlayerController player = hit.GetComponentInParent<PlayerController>();
+            PlayerController player = CombatUtil.GetHit(i).GetComponentInParent<PlayerController>();
             if (player != null)
             {
                 player.TakeDamage(ScaledDamage(slamDamage));

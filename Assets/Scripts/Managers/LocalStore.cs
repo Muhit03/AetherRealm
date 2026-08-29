@@ -77,13 +77,17 @@ public static class LocalStore
     }
 
     // ---- scores / leaderboard ----
+    // One row per finished run. GetLeaderboard groups these by player and keeps
+    // each player's best of every stat.
     [Serializable]
     class ScoreRow
     {
         public string username;
         public string classType;
         public int score;
+        public int waves;
         public int kills;
+        public int damage;
         public int playTime;
     }
 
@@ -93,7 +97,7 @@ public static class LocalStore
         public List<ScoreRow> rows = new List<ScoreRow>();
     }
 
-    public static void SaveScore(string username, string classType, int score, int kills, int playTimeSecs)
+    public static void SaveScore(string username, string classType, int score, int kills, int waves, int damage, int playTimeSecs)
     {
         ScoreList list = LoadScores();
         list.rows.Add(new ScoreRow
@@ -101,38 +105,75 @@ public static class LocalStore
             username = username,
             classType = classType,
             score = score,
+            waves = waves,
             kills = kills,
+            damage = damage,
             playTime = playTimeSecs
         });
 
-        list.rows.Sort((a, b) => b.score.CompareTo(a.score));
-        while (list.rows.Count > 10)
+        // keep the file from growing forever
+        while (list.rows.Count > 200)
         {
-            list.rows.RemoveAt(list.rows.Count - 1);
+            list.rows.RemoveAt(0);
         }
 
         PlayerPrefs.SetString("local_scores", JsonUtility.ToJson(list));
         PlayerPrefs.Save();
     }
 
-    public static List<LeaderboardEntry> GetLeaderboard()
+    // sortBy: "score" | "waves" | "kills" | "damage"
+    public static List<LeaderboardEntry> GetLeaderboard(string sortBy)
     {
-        var entries = new List<LeaderboardEntry>();
         ScoreList list = LoadScores();
 
-        for (int i = 0; i < list.rows.Count; i++)
+        // group every run by player and keep the best of each stat
+        Dictionary<string, LeaderboardEntry> best = new Dictionary<string, LeaderboardEntry>();
+        foreach (ScoreRow row in list.rows)
         {
-            ScoreRow row = list.rows[i];
-            LeaderboardEntry entry = new LeaderboardEntry();
-            entry.Rank = i + 1;
-            entry.Username = row.username;
-            entry.ClassType = row.classType;
-            entry.Score = row.score;
-            entry.Kills = row.kills;
-            entry.PlayTimeSecs = row.playTime;
-            entries.Add(entry);
+            string key = row.username == null ? "" : row.username.ToLower();
+
+            LeaderboardEntry entry;
+            if (!best.TryGetValue(key, out entry))
+            {
+                entry = new LeaderboardEntry();
+                entry.Username = row.username;
+                entry.ClassType = row.classType;
+            }
+
+            entry.Score = Mathf.Max(entry.Score, row.score);
+            entry.Waves = Mathf.Max(entry.Waves, row.waves);
+            entry.Kills = Mathf.Max(entry.Kills, row.kills);
+            entry.Damage = Mathf.Max(entry.Damage, row.damage);
+            entry.Games += 1;
+            entry.ClassType = row.classType;   // show their most recent class
+
+            best[key] = entry;
+        }
+
+        List<LeaderboardEntry> entries = new List<LeaderboardEntry>(best.Values);
+
+        entries.Sort((a, b) => SortValue(b, sortBy).CompareTo(SortValue(a, sortBy)));
+
+        for (int i = 0; i < entries.Count; i++)
+        {
+            LeaderboardEntry e = entries[i];
+            e.Rank = i + 1;
+            entries[i] = e;
+        }
+
+        if (entries.Count > 20)
+        {
+            entries.RemoveRange(20, entries.Count - 20);
         }
         return entries;
+    }
+
+    static int SortValue(LeaderboardEntry e, string sortBy)
+    {
+        if (sortBy == "waves") return e.Waves;
+        if (sortBy == "kills") return e.Kills;
+        if (sortBy == "damage") return e.Damage;
+        return e.Score;
     }
 
     static ScoreList LoadScores()

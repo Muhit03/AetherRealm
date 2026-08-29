@@ -17,6 +17,9 @@ public class GameBootstrap : MonoBehaviour
     CameraFollow cameraFollow;
     bool built;
 
+    // the archers read the cover-wall positions from here
+    public ArenaLayout Arena { get { return arena; } }
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void CreateIfMissing()
     {

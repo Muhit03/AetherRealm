@@ -59,7 +59,9 @@ public class AudioManager : MonoBehaviour
     // (a tone) or random values (noise), fading out towards the end.
     AudioClip MakeSound(float frequency, float length, bool noise)
     {
-        int sampleRate = 44100;
+        // 16 kHz is plenty for short blips and uses less than half the memory
+        // of a full-quality clip.
+        int sampleRate = 16000;
         int sampleCount = (int)(sampleRate * length);
         float[] samples = new float[sampleCount];
 

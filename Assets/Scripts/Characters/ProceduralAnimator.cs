@@ -19,6 +19,7 @@ namespace AetherRealm
         float attackLength;
         float castTimer;
         float hitTimer;
+        bool blockPose;
 
         bool dead;
         float deathProgress;
@@ -52,6 +53,17 @@ namespace AetherRealm
         public void PlayHit(Vector3 fromDirection)
         {
             hitTimer = 0.2f;
+        }
+
+        // Raise both arms up like a guard. Held until SetBlocking(false).
+        public void SetBlocking(bool on)
+        {
+            blockPose = on;
+        }
+
+        public void PlayBlock()
+        {
+            blockPose = true;
         }
 
         public void PlayDeath()
@@ -139,6 +151,12 @@ namespace AetherRealm
             {
                 rightArmAngle = -110f;
                 SetAngle(rig.leftArm, -110f);
+            }
+            else if (blockPose)
+            {
+                // both arms tucked up in front to guard
+                rightArmAngle = -70f;
+                SetAngle(rig.leftArm, -70f);
             }
 
             SetAngle(rig.rightArm, rightArmAngle);

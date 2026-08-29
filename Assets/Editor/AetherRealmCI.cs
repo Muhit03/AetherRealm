@@ -19,16 +19,28 @@ public static class AetherRealmCI
 
     static double startTime;
     static bool runStarted;
-    static bool goblinSpawned;
-    static bool goblinMeasured;
-    static bool goblinOnNavMesh;
-    static Vector3 goblinStartPos;
-    static float goblinMoved = -1f;
-    static string goblinDiag = "(not captured)";
+    static bool dbTested;
+    static string dbResult = "(not tested)";
     static float gameTimeSeen;
     static int gameFramesSeen;
-    static string dbResult = "(not tested)";
-    static bool dbTested;
+
+    // enemy AI checks
+    static bool enemiesSpawned;
+    static double spawnTime;
+    static EnemyController[] ciEnemies = new EnemyController[0];
+    static bool enemyStartRecorded;
+    static Vector3[] enemyStart = new Vector3[0];
+    static float enemyMovedAvg = -1f;
+    static float enemyNearestToPlayer = 999f;
+    static bool onNavMesh;
+    static bool measured;
+    static bool wasPlayingDuringWave;
+
+    // leaderboard check
+    static bool runEnded;
+    static int leaderboardRows = -1;
+    static string leaderboardTop = "(none)";
+
     static readonly StringBuilder errors = new StringBuilder();
 
     // ---- command line entry point ----
@@ -111,10 +123,17 @@ public static class AetherRealmCI
         gameTimeSeen = Time.time;
         gameFramesSeen = Time.frameCount;
 
-        // ~2s in: log in and start the run
+        // ~2s in: log in (so scores save) and start the run
         if (!runStarted && elapsed > 2.0)
         {
             runStarted = true;
+            if (AuthManager.Instance != null)
+            {
+                if (!AuthManager.Instance.Login("ci_hero", "pass1234"))
+                {
+                    AuthManager.Instance.Register("ci_hero", "pass1234", "Warrior");
+                }
+            }
             if (GameBootstrap.Instance != null)
             {
                 GameBootstrap.Instance.BeginRun("Warrior");
@@ -148,51 +167,93 @@ public static class AetherRealmCI
             }
         }
 
-        // ~4s in: drop a goblin far from the player
-        if (runStarted && !goblinSpawned && elapsed > 4.0)
+        // once the DB probe is done: drop 4 enemies right at a spawn portal
+        // (this is the exact situation the "enemies stand outside the map" bug
+        // was about). Timing is measured from here on, not from launch, because
+        // the SQL timeouts above eat several seconds of wall-clock.
+        if (runStarted && dbTested && !enemiesSpawned && elapsed > 4.0)
         {
-            goblinSpawned = true;
-            AetherRealm.EnemyFactory.Create(AetherRealm.EnemyFactory.Kind.Goblin, new Vector3(15f, 1f, 0f));
+            enemiesSpawned = true;
+            spawnTime = elapsed;
+            Vector3 portal = new Vector3(17f, 0f, 0f);
+            ciEnemies = new EnemyController[4];
+            ciEnemies[0] = AetherRealm.EnemyFactory.Create(AetherRealm.EnemyFactory.Kind.Goblin, portal);
+            ciEnemies[1] = AetherRealm.EnemyFactory.Create(AetherRealm.EnemyFactory.Kind.Goblin, portal + Vector3.forward);
+            ciEnemies[2] = AetherRealm.EnemyFactory.Create(AetherRealm.EnemyFactory.Kind.Archer, portal - Vector3.forward);
+            ciEnemies[3] = AetherRealm.EnemyFactory.Create(AetherRealm.EnemyFactory.Kind.Brute, portal + Vector3.right * 0.5f);
         }
 
-        // ~6s in: record where it starts
-        if (goblinSpawned && goblinStartPos == Vector3.zero && elapsed > 6.0)
+        double sinceSpawn = elapsed - spawnTime;
+
+        // 2s after spawn: record where these 4 landed
+        if (enemiesSpawned && !enemyStartRecorded && sinceSpawn > 2.0)
         {
-            var g = UnityEngine.Object.FindAnyObjectByType<MeleeGoblin>();
-            if (g != null)
+            enemyStartRecorded = true;
+            enemyStart = new Vector3[ciEnemies.Length];
+            onNavMesh = true;
+            for (int i = 0; i < ciEnemies.Length; i++)
             {
-                var agent = g.GetComponent<UnityEngine.AI.NavMeshAgent>();
-                goblinOnNavMesh = agent != null && agent.isOnNavMesh;
-                goblinStartPos = g.transform.position;
+                if (ciEnemies[i] == null) { onNavMesh = false; continue; }
+                enemyStart[i] = ciEnemies[i].transform.position;
+                var agent = ciEnemies[i].GetComponent<UnityEngine.AI.NavMeshAgent>();
+                if (agent == null || !agent.isOnNavMesh) onNavMesh = false;
             }
         }
 
-        // ~16s in: measure how far it travelled and dump agent diagnostics
-        if (goblinStartPos != Vector3.zero && !goblinMeasured && elapsed > 16.0)
+        // 10s after spawn: how far did these 4 travel, and did any reach the player?
+        if (enemyStartRecorded && !measured && sinceSpawn > 10.0)
         {
-            goblinMeasured = true;
-            var g = UnityEngine.Object.FindAnyObjectByType<MeleeGoblin>();
-            if (g != null)
+            measured = true;
+            wasPlayingDuringWave = GameManager.Instance != null && GameManager.Instance.IsPlaying;
+            GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
+
+            float total = 0f;
+            int counted = 0;
+            for (int i = 0; i < ciEnemies.Length; i++)
             {
-                goblinMoved = Vector3.Distance(g.transform.position, goblinStartPos);
-                var agent = g.GetComponent<UnityEngine.AI.NavMeshAgent>();
-                if (agent != null)
+                if (ciEnemies[i] == null) continue;   // it died - that's fine
+                total += Vector3.Distance(ciEnemies[i].transform.position, enemyStart[i]);
+                counted++;
+                if (playerObj != null)
                 {
-                    goblinDiag = "speed=" + agent.speed.ToString("F1") +
-                                 " isStopped=" + agent.isStopped +
-                                 " hasPath=" + agent.hasPath +
-                                 " pathStatus=" + agent.pathStatus +
-                                 " remaining=" + agent.remainingDistance.ToString("F1") +
-                                 " vel=" + agent.velocity.magnitude.ToString("F2");
+                    float d = Vector3.Distance(ciEnemies[i].transform.position, playerObj.transform.position);
+                    if (d < enemyNearestToPlayer) enemyNearestToPlayer = d;
                 }
             }
-            else
+            enemyMovedAvg = counted > 0 ? total / counted : 50f; // all dead = they definitely engaged
+        }
+
+        // pretend the player finished a big run, then died - so we can check the
+        // run gets written to the leaderboard with the new stats.
+        if (measured && !runEnded && sinceSpawn > 11.0)
+        {
+            runEnded = true;
+            if (GameManager.Instance != null)
             {
-                goblinDiag = "(goblin no longer in scene - it may have been killed)";
+                GameManager.Instance.AddDamageDealt(1234);
+                GameManager.Instance.AddScore(500);
+                GameManager.Instance.OnPlayerDeath();
             }
         }
 
-        if (elapsed > 22.0)
+        // read the leaderboard back
+        if (runEnded && leaderboardRows < 0 && sinceSpawn > 13.0)
+        {
+            var board = DatabaseManager.Instance.GetLeaderboard("damage");
+            leaderboardRows = board.Count;
+            if (board.Count > 0)
+            {
+                LeaderboardEntry e = board[0];
+                leaderboardTop = e.Username + " score=" + e.Score + " waves=" + e.Waves +
+                                 " kills=" + e.Kills + " damage=" + e.Damage + " games=" + e.Games;
+            }
+        }
+
+        if (leaderboardRows >= 0 && sinceSpawn > 14.0)
+        {
+            Finish();
+        }
+        if (elapsed > 45.0)   // absolute safety timeout
         {
             Finish();
         }
@@ -214,11 +275,8 @@ public static class AetherRealmCI
         ok &= Check(report, "HUD built", HUDController.Instance != null);
         ok &= Check(report, "Player spawned", GameObject.FindGameObjectWithTag("Player") != null);
         ok &= Check(report, "Arena floor built", GameObject.Find("Floor") != null);
-        ok &= Check(report, "Run is playing", GameManager.Instance != null && GameManager.Instance.IsPlaying);
+        ok &= Check(report, "run was live during the wave", wasPlayingDuringWave);
 
-        var enemies = UnityEngine.Object.FindObjectsByType<EnemyController>(FindObjectsInactive.Include);
-        report.AppendLine("  enemies in arena: " + enemies.Length);
-        report.AppendLine("  score: " + (GameManager.Instance != null ? GameManager.Instance.Score : -1));
         report.AppendLine("  game time: " + gameTimeSeen.ToString("F1") + "s, game frames: " + gameFramesSeen);
 
         // strip control characters so the log line doesn't get truncated
@@ -228,15 +286,19 @@ public static class AetherRealmCI
             dbClean += (c < ' ') ? ' ' : c;
         }
         report.AppendLine("  Microsoft SQL client: " + dbClean);
-        // "CONNECTED" = server reachable; "SqlException" = client stack works, server just isn't up.
-        // Anything else (TypeLoad / FileNotFound / PlatformNotSupported) means the client is broken.
         bool sqlClientWorks = dbClean.Contains("CONNECTED") || dbClean.Contains("SqlException");
         ok &= Check(report, "Microsoft SQL client stack works on this platform", sqlClientWorks);
 
-        ok &= Check(report, "test goblin reached the NavMesh", goblinOnNavMesh);
-        ok &= Check(report, "test goblin walked towards the player", goblinMoved > 1f);
-        report.AppendLine("  goblin moved: " + goblinMoved.ToString("F1") + " m");
-        report.AppendLine("  goblin agent: " + goblinDiag);
+        // --- enemy AI ---
+        ok &= Check(report, "spawned enemies landed on the NavMesh", onNavMesh);
+        ok &= Check(report, "enemies moved into the map (not stuck at portal)", enemyMovedAvg > 4f);
+        ok &= Check(report, "an enemy reached the player", enemyNearestToPlayer < 12f);
+        report.AppendLine("  enemies moved on average " + enemyMovedAvg.ToString("F1") +
+                          " m, nearest got within " + enemyNearestToPlayer.ToString("F1") + " m of the player");
+
+        // --- leaderboard ---
+        ok &= Check(report, "run written to the leaderboard", leaderboardRows >= 1);
+        report.AppendLine("  leaderboard rows: " + leaderboardRows + " | top: " + leaderboardTop);
 
         if (errors.Length > 0)
         {
@@ -248,6 +310,12 @@ public static class AetherRealmCI
         report.AppendLine("RESULT: " + (ok ? "PASS" : "FAIL"));
         Debug.Log(report.ToString());
         Debug.Log("AETHERREALM CI RESULT: " + (ok ? "PASS" : "FAIL"));   // always its own line
+
+        // don't leave the test account / scores in the local leaderboard
+        PlayerPrefs.DeleteKey("local_scores");
+        PlayerPrefs.DeleteKey("local_user_ci_hero");
+        PlayerPrefs.DeleteKey("local_user_ci_probe");
+        PlayerPrefs.Save();
 
         EditorApplication.isPlaying = false;
         EditorApplication.Exit(ok ? 0 : 1);

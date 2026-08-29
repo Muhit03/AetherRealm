@@ -2,23 +2,25 @@ using UnityEngine;
 using AetherRealm;
 
 /// <summary>
-/// A melee goblin. Inherits movement, health and death from
+/// A melee goblin. Inherits movement, health, blocking and death from
 /// <see cref="EnemyController"/> (inheritance) and only adds its own club swing
-/// in the overridden DoAttack (polymorphism).
+/// in the overridden DoAttack (polymorphism). It surrounds the player with its
+/// group and sometimes raises a guard to block hits.
 /// </summary>
 public class MeleeGoblin : EnemyController
 {
-    public int clubDamage = 9;
+    public int clubDamage = 8;
 
     protected override void Awake()
     {
-        maxHealth = 34;
-        moveSpeed = 3.4f;
+        maxHealth = 32;
+        moveSpeed = 3.6f;
         attackRange = 1.9f;
-        attackCooldown = 1.3f;
+        attackCooldown = 1.2f;
         scoreValue = 10;
         goldValue = 8;
-        attackStyle = AttackStyle.Melee;
+        behaviour = Behaviour.Grunt;
+        blockChance = 0.3f;
         base.Awake();
     }
 
@@ -29,8 +31,8 @@ public class MeleeGoblin : EnemyController
 
     protected override void DoAttack(IDamageable target)
     {
-        if (animator != null) animator.PlayAttack(0.35f);
-        PushBack(transform.forward, 4f); // small lunge forward
+        if (animator != null) animator.PlayAttack(0.3f);
+        PushBack(transform.forward, 3f); // small lunge forward
         target.TakeDamage(ScaledDamage(clubDamage));
     }
 }

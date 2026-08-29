@@ -36,10 +36,19 @@ and removes an old "missing script" warning. It is not required.)*
 
 ### The game
 
-Survive **8 waves** of goblins and archers that path in from four portals. Kills
-drop gold. Between waves, Elder Eldrin's shop lets you spend gold on permanent
-upgrades (health, damage, speed, cooldown, lifesteal). Wave 8 is the **Ogre
-Warlord** boss — beat it to win. Your score is saved to the SQL leaderboard.
+Survive **8 waves** that pour in from four portals. Each wave has more enemies,
+tougher stats and new enemy types:
+
+| Enemy | Behaviour |
+|---|---|
+| **Goblin** (wave 1+) | Rushes in. A group spreads out to *surround* the player instead of queueing. After a swing it often **raises a guard** — hits from the front only do a quarter damage. |
+| **Archer** (wave 3+) | Hangs back, moves to a spot **behind a cover wall**, and only shoots when it has a clear line to the player. If you close in it **runs**; if the shot is blocked it shuffles or finds new cover. |
+| **Brute** (wave 4+) | Big, slow, lots of health. Guards more than half the time and its hit **shoves you backwards**. |
+| **Ogre Warlord** (wave 8) | Boss. Ground-slam AoE, never blocks. Beat it to win. |
+
+A big unblocked hit **staggers** any non-boss enemy for a moment. Kills drop
+gold; spend it at Elder Eldrin's shop between waves. Every finished run is saved
+to the leaderboard.
 
 ---
 
@@ -48,17 +57,31 @@ Warlord** boss — beat it to win. Your score is saved to the SQL leaderboard.
 | Concept | Where to point |
 |---|---|
 | **Abstraction** | `IDamageable`, `IInteractable`, `IEnemyState`, `ISaveable` — callers use the interface and never check the real type |
-| **Inheritance** | `Warrior` / `Mage` extend `PlayerController`; `MeleeGoblin` / `RangedArcher` / `BossOgre` extend `EnemyController` |
+| **Inheritance** | `Warrior` / `Mage` extend `PlayerController`; `MeleeGoblin` / `RangedArcher` / `BruteGoblin` / `BossOgre` extend `EnemyController` |
 | **Polymorphism** | overridden `TakeDamage`, `UseAbility`, `DoAttack`, `OnDeath`; one attack-overlap hits players, enemies **and** barrels with the same code |
 | **Encapsulation** | health / gold / score are private, read through properties and changed only through methods like `AddGold` and `SpendGold` |
 
 Other things worth mentioning in a viva:
-- **State machine** — `EnemyController` never checks "am I chasing or attacking";
-  it just runs `Enter` / `Tick` / `Exit` on the current `IEnemyState`.
+- **State machine** — `EnemyController` never checks "am I chasing, attacking or
+  blocking"; it just runs `Enter` / `Tick` / `Exit` on the current `IEnemyState`.
+  The states live in `EnemyStates.cs` (`MeleeApproachState`, `BlockState`,
+  `ArcherRepositionState`, `ArcherShootState`, `StaggerState`, ...).
 - **Events** — `EnemyController.Died` is a `static event`; the wave manager and
   HUD subscribe to it instead of everything referencing each other.
+- **NavMesh** — enemies path with `NavMeshAgent`; archers use `Physics.Raycast`
+  for line-of-sight and read the cover-wall positions from `ArenaLayout`.
 - **Database** — `DatabaseManager` calls SQL Server **stored procedures** with
   parameterised `SqlCommand`s; passwords are **SHA-256 hashed** in `AuthManager`.
+
+### Memory / performance notes
+
+- Shared `Collider[]` buffer for attack overlap checks (`CombatUtil`) instead of
+  allocating a new array every swing.
+- Hard caps on live damage-numbers and sparks (`Effects`).
+- `WaveManager.maxEnemiesAtOnce` keeps at most 12 enemies alive; the rest spawn
+  as those die.
+- Projectiles use one short raycast per frame instead of an overlap sphere.
+- Sound clips are generated at 16 kHz mono.
 
 ---
 

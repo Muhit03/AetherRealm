@@ -6,9 +6,17 @@ namespace AetherRealm
     // Simple "game feel" helpers: shake the camera, freeze the game for a split
     // second on a big hit, show floating text, and throw a few sparks.
     // It creates itself the first time it is used so nothing needs wiring up.
+    //
+    // To keep things smooth during busy waves there are hard caps on how many
+    // floating texts and sparks can exist at once.
     public class Effects : MonoBehaviour
     {
+        const int MaxTexts = 18;
+        const int MaxSparks = 70;
+
         static Effects instance;
+        public static int LiveTexts;
+        public static int LiveSparks;
 
         static Effects Instance
         {
@@ -55,6 +63,13 @@ namespace AetherRealm
             camera.transform.localPosition += currentShakeOffset;
         }
 
+        // Called when a new run starts, in case the counters drifted.
+        public static void ResetCounters()
+        {
+            LiveTexts = 0;
+            LiveSparks = 0;
+        }
+
         public static void Shake(float amount)
         {
             if (amount > Instance.shakeAmount)
@@ -81,6 +96,10 @@ namespace AetherRealm
 
         public static void FloatingLabel(Vector3 position, string message, Color color, float size)
         {
+            if (LiveTexts >= MaxTexts)
+            {
+                return;
+            }
             GameObject go = new GameObject("FloatingText");
             go.transform.position = position;
             FloatingText text = go.AddComponent<FloatingText>();
@@ -97,6 +116,11 @@ namespace AetherRealm
         {
             for (int i = 0; i < count; i++)
             {
+                if (LiveSparks >= MaxSparks)
+                {
+                    return;
+                }
+
                 GameObject spark = GameObject.CreatePrimitive(PrimitiveType.Cube);
                 spark.name = "Spark";
                 Destroy(spark.GetComponent<Collider>());
@@ -106,6 +130,7 @@ namespace AetherRealm
 
                 Spark mover = spark.AddComponent<Spark>();
                 mover.velocity = Random.onUnitSphere * 6f + Vector3.up * 2f;
+                LiveSparks++;
             }
         }
     }
@@ -126,6 +151,11 @@ namespace AetherRealm
             {
                 Destroy(gameObject);
             }
+        }
+
+        void OnDestroy()
+        {
+            Effects.LiveSparks--;
         }
     }
 }

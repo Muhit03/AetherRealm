@@ -36,20 +36,23 @@ public class Warrior : PlayerController
         if (Animator != null) Animator.PlayAttack(0.5f);
 
         // hit everything around us and push it away
-        foreach (Collider hit in Physics.OverlapSphere(transform.position, bashRadius))
+        int count = CombatUtil.OverlapSphere(transform.position, bashRadius);
+        for (int i = 0; i < count; i++)
         {
+            Collider hit = CombatUtil.GetHit(i);
             if (hit.transform.IsChildOf(transform))
             {
                 continue;
             }
 
             IDamageable target = hit.GetComponentInParent<IDamageable>();
-            if (target == null)
+            if (target == null || target is PlayerController)
             {
                 continue;
             }
 
             target.TakeDamage(bashDamage);
+            RecordDamage(bashDamage);
 
             Knockback targetKnockback = hit.GetComponentInParent<Knockback>();
             if (targetKnockback != null)

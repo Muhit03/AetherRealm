@@ -21,6 +21,7 @@ public class GameManager : MonoBehaviour
 
     int score;
     int kills;
+    int damageDealt;
     float startTime;
     RunState state = RunState.Menu;
 
@@ -29,6 +30,8 @@ public class GameManager : MonoBehaviour
 
     public int Score { get { return score; } }
     public int Kills { get { return kills; } }
+    public int DamageDealt { get { return damageDealt; } }
+    public int WavesCleared { get { return WaveManager.Instance != null ? WaveManager.Instance.WavesCleared : 0; } }
     public int SecondsPlayed { get { return Mathf.FloorToInt(Time.time - startTime); } }
     public bool IsPlaying { get { return state == RunState.Playing; } }
     public bool IsGameOver { get { return state == RunState.Lost || state == RunState.Won; } }
@@ -54,9 +57,11 @@ public class GameManager : MonoBehaviour
         player = hero;
         score = 0;
         kills = 0;
+        damageDealt = 0;
         startTime = Time.time;
         state = RunState.Playing;
         upgradeLevels.Clear();
+        Effects.ResetCounters();
 
         if (ScoreChanged != null) ScoreChanged(score);
         if (KillsChanged != null) KillsChanged(kills);
@@ -93,6 +98,15 @@ public class GameManager : MonoBehaviour
         }
         score += amount;
         if (ScoreChanged != null) ScoreChanged(score);
+    }
+
+    // Called whenever the player deals damage. Feeds the leaderboard stat.
+    public void AddDamageDealt(int amount)
+    {
+        if (state == RunState.Playing && amount > 0)
+        {
+            damageDealt += amount;
+        }
     }
 
     // ---- shop upgrades ----
@@ -153,14 +167,14 @@ public class GameManager : MonoBehaviour
             score += 1000;
         }
 
-        int wave = (WaveManager.Instance != null) ? WaveManager.Instance.CurrentWave : 0;
+        int waves = WavesCleared;
 
-        // save the score to SQL Server
+        // save the run to the leaderboard (SQL Server, or the local fallback)
         if (AuthManager.IsLoggedIn && DatabaseManager.Instance != null)
         {
             try
             {
-                DatabaseManager.Instance.SaveScore(AuthManager.CurrentPlayerId, score, kills, SecondsPlayed);
+                DatabaseManager.Instance.SaveScore(AuthManager.CurrentPlayerId, score, kills, waves, damageDealt, SecondsPlayed);
             }
             catch (Exception error)
             {
@@ -169,7 +183,7 @@ public class GameManager : MonoBehaviour
         }
 
         if (LeaderboardManager.Instance != null) LeaderboardManager.Instance.Refresh();
-        if (UIManager.Instance != null) UIManager.Instance.ShowEndScreen(won, score, kills, wave);
+        if (UIManager.Instance != null) UIManager.Instance.ShowEndScreen(won, score, kills, waves);
     }
 
     public void Restart()

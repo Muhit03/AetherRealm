@@ -3,7 +3,9 @@ using UnityEngine;
 namespace AetherRealm
 {
     // A travelling attack - an arrow or a magic bolt. It flies forward and
-    // damages the first thing it touches that belongs to the other side.
+    // damages the first thing it touches that belongs to the other side. It
+    // uses a short raycast each step instead of an overlap check, which is
+    // cheaper and doesn't miss when the bolt is moving fast.
     public class Projectile : MonoBehaviour
     {
         public enum Side { Player, Enemy }
@@ -47,39 +49,58 @@ namespace AetherRealm
                 return;
             }
 
-            transform.position += transform.forward * speed * Time.deltaTime;
+            float step = speed * Time.deltaTime;
 
-            Collider[] nearby = Physics.OverlapSphere(transform.position, 0.4f);
-            foreach (Collider collider in nearby)
+            if (Physics.Raycast(transform.position, transform.forward, out RaycastHit hit, step + 0.2f))
             {
-                if (firedBy != null && collider.transform.IsChildOf(firedBy.transform))
+                if (firedBy == null || !hit.collider.transform.IsChildOf(firedBy.transform))
                 {
-                    continue;
-                }
-
-                bool hitPlayer = collider.GetComponentInParent<PlayerController>() != null;
-                bool hitEnemy = collider.GetComponentInParent<EnemyController>() != null;
-
-                // does this projectile care about what it just touched?
-                bool validTarget = (side == Side.Player && hitEnemy) || (side == Side.Enemy && hitPlayer);
-
-                if (validTarget)
-                {
-                    IDamageable target = collider.GetComponentInParent<IDamageable>();
-                    target.TakeDamage(damage);
-                    Effects.Sparks(transform.position, Palette.Health, 6);
-                    Destroy(gameObject);
+                    HitSomething(hit.collider, hit.point);
                     return;
                 }
+            }
 
-                // hit a wall or pillar - just disappear
-                bool hitScenery = !hitPlayer && !hitEnemy && collider.GetComponent<Renderer>() != null;
-                if (hitScenery)
+            transform.position += transform.forward * step;
+        }
+
+        void HitSomething(Collider collider, Vector3 point)
+        {
+            PlayerController player = collider.GetComponentInParent<PlayerController>();
+            EnemyController enemy = collider.GetComponentInParent<EnemyController>();
+
+            bool hitsTarget = (side == Side.Player && enemy != null) || (side == Side.Enemy && player != null);
+
+            if (hitsTarget)
+            {
+                IDamageable target = collider.GetComponentInParent<IDamageable>();
+                target.TakeDamage(damage);
+
+                if (side == Side.Player && player == null)
                 {
-                    Effects.Sparks(transform.position, Color.gray, 4);
-                    Destroy(gameObject);
-                    return;
+                    // a bolt the player fired - count it towards damage dealt
+                    GameObject me = GameObject.FindGameObjectWithTag("Player");
+                    if (me != null)
+                    {
+                        PlayerController pc = me.GetComponent<PlayerController>();
+                        if (pc != null) pc.RecordDamage(damage);
+                    }
                 }
+
+                Effects.Sparks(point, Palette.Health, 5);
+                Destroy(gameObject);
+                return;
+            }
+
+            // hit an ally or a wall - just fizzle out
+            if (player == null && enemy == null)
+            {
+                Effects.Sparks(point, Color.gray, 3);
+                Destroy(gameObject);
+            }
+            else
+            {
+                // grazed an ally - skip past it and keep flying
+                transform.position = point + transform.forward * 1.3f;
             }
         }
     }

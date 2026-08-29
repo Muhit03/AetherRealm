@@ -66,6 +66,10 @@ public class PlayerController : MonoBehaviour, IDamageable, ISaveable
     public float StaminaFraction { get { return stamina / maxStamina; } }
     public int TotalAttackDamage { get { return attackDamage + bonusDamage; } }
 
+    // True for a short window right after a swing. The goblins watch this to
+    // decide when to raise a block.
+    public bool IsAttacking { get { return attackTimer > attackCooldown * 0.35f; } }
+
     public virtual float AbilityFraction
     {
         get { return 1f - (abilityTimer / (abilityCooldown * cooldownScale)); }
@@ -256,15 +260,17 @@ public class PlayerController : MonoBehaviour, IDamageable, ISaveable
         Vector3 center = transform.position + Vector3.up * 0.9f + transform.forward * 0.6f;
         bool hitAnything = false;
 
-        foreach (Collider hit in Physics.OverlapSphere(center, attackRange))
+        int count = CombatUtil.OverlapSphere(center, attackRange);
+        for (int i = 0; i < count; i++)
         {
+            Collider hit = CombatUtil.GetHit(i);
             if (hit.transform.IsChildOf(transform))
             {
                 continue;
             }
 
             IDamageable target = hit.GetComponentInParent<IDamageable>();
-            if (target == null)
+            if (target == null || target is PlayerController)
             {
                 continue;
             }
@@ -278,6 +284,7 @@ public class PlayerController : MonoBehaviour, IDamageable, ISaveable
             }
 
             target.TakeDamage(damage);
+            RecordDamage(damage);
             hitAnything = true;
 
             Knockback targetKnockback = hit.GetComponentInParent<Knockback>();
@@ -357,11 +364,21 @@ public class PlayerController : MonoBehaviour, IDamageable, ISaveable
         return false;
     }
 
+    // Adds to this run's "damage dealt" total, used by the leaderboard.
+    public void RecordDamage(int amount)
+    {
+        if (amount > 0 && GameManager.Instance != null)
+        {
+            GameManager.Instance.AddDamageDealt(amount);
+        }
+    }
+
     void Interact()
     {
-        foreach (Collider hit in Physics.OverlapSphere(transform.position + transform.forward, 1.8f))
+        int count = CombatUtil.OverlapSphere(transform.position + transform.forward, 1.8f);
+        for (int i = 0; i < count; i++)
         {
-            IInteractable interactable = hit.GetComponentInParent<IInteractable>();
+            IInteractable interactable = CombatUtil.GetHit(i).GetComponentInParent<IInteractable>();
             if (interactable != null)
             {
                 interactable.Interact();

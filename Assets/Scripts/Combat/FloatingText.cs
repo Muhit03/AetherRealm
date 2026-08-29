@@ -30,6 +30,12 @@ namespace AetherRealm
             color = textColor;
             velocity = new Vector3(Random.Range(-0.5f, 0.5f), 3f, 0f);
             life = maxLife;
+            Effects.LiveTexts++;
+        }
+
+        void OnDestroy()
+        {
+            Effects.LiveTexts--;
         }
 
         void Update()
