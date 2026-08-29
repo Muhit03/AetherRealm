@@ -11,6 +11,7 @@ public class DialoguePanel : MonoBehaviour
     TMP_Text _speaker, _body;
     Coroutine _typing;
     string _full = "";
+    float _autoCloseTimer;
 
     void Awake() => Instance = this;
 
@@ -20,7 +21,7 @@ public class DialoguePanel : MonoBehaviour
         UIFactory.Stretch(root);
 
         var box = UIFactory.Box(root, "Box", UIFactory.Panel);
-        UIFactory.At(box.rectTransform, new Vector2(0.5f, 0f), new Vector2(0f, 60f), new Vector2(1300f, 240f));
+        UIFactory.At(box.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -190f), new Vector2(1200f, 150f));
 
         _speaker = UIFactory.Label(box.transform, "", 34, TextAlignmentOptions.Left);
         UIFactory.At(_speaker.rectTransform, new Vector2(0f, 1f), new Vector2(40f, -20f), new Vector2(600f, 44f));
@@ -40,6 +41,7 @@ public class DialoguePanel : MonoBehaviour
         gameObject.SetActive(true);
         _speaker.text = speaker;
         _full = text;
+        _autoCloseTimer = 3.5f + text.Length * 0.02f;   // closes itself after a while
         if (_typing != null) StopCoroutine(_typing);
         _typing = StartCoroutine(Type());
     }
@@ -59,7 +61,17 @@ public class DialoguePanel : MonoBehaviour
     void Update()
     {
         if (!gameObject.activeSelf) return;
-        if (Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0))
+
+        // close itself so it never blocks the screen during a fight
+        _autoCloseTimer -= Time.deltaTime;
+        if (_autoCloseTimer <= 0f)
+        {
+            gameObject.SetActive(false);
+            return;
+        }
+
+        // E or Space skips the typing / closes early (not left-click - that's attack)
+        if (Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.Space))
         {
             if (_typing != null) { StopCoroutine(_typing); _body.text = _full; _typing = null; }
             else gameObject.SetActive(false);

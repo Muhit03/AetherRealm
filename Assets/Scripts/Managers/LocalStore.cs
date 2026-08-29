@@ -32,10 +32,44 @@ public static class LocalStore
         }
 
         int id = NextId();
-        PlayerPrefs.SetString(key, id + "|" + passwordHash + "|" + classType + "|0|100|100");
+        // value: id | hash | class | gold | hp | maxhp | displayName
+        PlayerPrefs.SetString(key, id + "|" + passwordHash + "|" + classType + "|0|100|100|" + username);
         PlayerPrefs.SetString("local_id_" + id, username.ToLower());
+        AddToUserList(username);
         PlayerPrefs.Save();
         return id;
+    }
+
+    // Keeps a list of every registered account so the leaderboard can show a
+    // player even before they finish their first run.
+    static void AddToUserList(string username)
+    {
+        string list = PlayerPrefs.GetString("local_users", "");
+        foreach (string name in list.Split(';'))
+        {
+            if (name.Equals(username, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+        }
+        PlayerPrefs.SetString("local_users", string.IsNullOrEmpty(list) ? username : list + ";" + username);
+    }
+
+    static List<string> RegisteredUsers()
+    {
+        var users = new List<string>();
+        string list = PlayerPrefs.GetString("local_users", "");
+        if (!string.IsNullOrEmpty(list))
+        {
+            users.AddRange(list.Split(';'));
+        }
+        return users;
+    }
+
+    static string ClassOf(string username)
+    {
+        string[] parts = PlayerPrefs.GetString("local_user_" + username.ToLower(), "").Split('|');
+        return parts.Length >= 3 ? parts[2] : "Warrior";
     }
 
     public static int LoginPlayer(string username, string passwordHash, out string classType)
@@ -70,8 +104,9 @@ public static class LocalStore
         string[] parts = PlayerPrefs.GetString(key).Split('|');
         if (parts.Length >= 3)
         {
+            string displayName = parts.Length >= 7 ? parts[6] : username;
             PlayerPrefs.SetString(key,
-                parts[0] + "|" + parts[1] + "|" + parts[2] + "|" + gold + "|" + health + "|" + maxHealth);
+                parts[0] + "|" + parts[1] + "|" + parts[2] + "|" + gold + "|" + health + "|" + maxHealth + "|" + displayName);
             PlayerPrefs.Save();
         }
     }
@@ -126,8 +161,19 @@ public static class LocalStore
     {
         ScoreList list = LoadScores();
 
-        // group every run by player and keep the best of each stat
         Dictionary<string, LeaderboardEntry> best = new Dictionary<string, LeaderboardEntry>();
+
+        // start with every registered player at zero, so a new account shows up
+        // on the leaderboard straight away
+        foreach (string user in RegisteredUsers())
+        {
+            LeaderboardEntry blank = new LeaderboardEntry();
+            blank.Username = user;
+            blank.ClassType = ClassOf(user);
+            best[user.ToLower()] = blank;
+        }
+
+        // then fill in the best of each stat from finished runs
         foreach (ScoreRow row in list.rows)
         {
             string key = row.username == null ? "" : row.username.ToLower();

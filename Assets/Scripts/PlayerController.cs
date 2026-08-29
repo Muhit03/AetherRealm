@@ -39,12 +39,12 @@ public class PlayerController : MonoBehaviour, IDamageable, ISaveable
 
     float maxStamina = 100f;
     float stamina;
-    float attackTimer;
+    protected float attackTimer;
+    protected bool isDodging;
     float abilityTimer;
     int comboStep;
     float comboTimer;
 
-    bool isDodging;
     float dodgeTimer;
     Vector3 dodgeDirection;
     float fallingSpeed;
@@ -55,7 +55,10 @@ public class PlayerController : MonoBehaviour, IDamageable, ISaveable
     DamageFlash damageFlash;
     Knockback knockback;
     CharacterRig rig;
-    Vector3 aimPoint;
+    protected Vector3 aimPoint;
+
+    // Where on the ground the mouse is pointing - Mage aims its bolts here.
+    protected Vector3 AimPoint { get { return aimPoint; } }
 
     // Properties other scripts read
     public int CurrentHealth { get { return currentHealth; } }
@@ -235,13 +238,11 @@ public class PlayerController : MonoBehaviour, IDamageable, ISaveable
         {
             Interact();
         }
-        if (Input.GetKeyDown(KeyCode.Tab) && UIManager.Instance != null)
-        {
-            UIManager.Instance.ToggleLeaderboard();
-        }
+        // Tab (leaderboard) is handled by UIManager so it works even when dead.
     }
 
-    public void Attack()
+    // The Warrior uses this melee swing. The Mage overrides it with a ranged bolt.
+    public virtual void Attack()
     {
         if (attackTimer > 0f || isDodging)
         {
@@ -290,7 +291,7 @@ public class PlayerController : MonoBehaviour, IDamageable, ISaveable
             Knockback targetKnockback = hit.GetComponentInParent<Knockback>();
             if (targetKnockback != null)
             {
-                targetKnockback.Push(toTarget, 5f);
+                targetKnockback.Push(toTarget, 3f);
             }
 
             if (lifesteal > 0f)
@@ -311,13 +312,14 @@ public class PlayerController : MonoBehaviour, IDamageable, ISaveable
 
     void ShowSwing(Vector3 position)
     {
+        // a small flat sweep in front of the player - just a hint of the swing
         GameObject arc = GameObject.CreatePrimitive(PrimitiveType.Quad);
         Destroy(arc.GetComponent<Collider>());
-        arc.transform.position = position;
+        arc.transform.position = position + transform.forward * 0.4f;
         arc.transform.rotation = Quaternion.LookRotation(Vector3.up, transform.forward);
-        arc.transform.localScale = Vector3.one * attackRange * 2f;
-        arc.GetComponent<Renderer>().sharedMaterial = Palette.UnlitMaterial(new Color(1f, 1f, 1f, 0.4f));
-        Destroy(arc, 0.1f);
+        arc.transform.localScale = new Vector3(attackRange * 1.3f, attackRange * 0.9f, 1f);
+        arc.GetComponent<Renderer>().sharedMaterial = Palette.UnlitMaterial(new Color(1f, 1f, 1f, 0.12f));
+        Destroy(arc, 0.08f);
     }
 
     void Dodge()
@@ -402,6 +404,11 @@ public class PlayerController : MonoBehaviour, IDamageable, ISaveable
         if (isDodging)
         {
             return; // invincible during a dodge roll
+        }
+
+        if (amount <= 0)
+        {
+            return; // fully blocked / absorbed - no feedback needed
         }
 
         currentHealth -= amount;

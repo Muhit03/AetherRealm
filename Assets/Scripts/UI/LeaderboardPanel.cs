@@ -29,10 +29,10 @@ public class LeaderboardPanel : MonoBehaviour
     {
         RectTransform root = (RectTransform)transform;
         UIFactory.Stretch(root);
-        Image dim = UIFactory.Box(root, "Dim", new Color(0f, 0f, 0f, 0.6f));
+        Image dim = UIFactory.Box(root, "Dim", new Color(0f, 0f, 0f, 0.9f));
         UIFactory.Stretch(dim.rectTransform);
 
-        Image card = UIFactory.Box(root, "Card", UIFactory.Panel);
+        Image card = UIFactory.Box(root, "Card", new Color(0.09f, 0.10f, 0.14f, 1f));
         UIFactory.At(card.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(1180f, 840f));
 
         TMP_Text title = UIFactory.Label(card.transform, "LEADERBOARD", 44, TextAlignmentOptions.Center);
@@ -97,7 +97,9 @@ public class LeaderboardPanel : MonoBehaviour
 
         if (entries.Count == 0)
         {
-            AddRow("", "No runs recorded yet - be the first!", "", "", "", "", "", false);
+            TMP_Text empty = UIFactory.Label(rowsParent, "No runs recorded yet - be the first!", 26, TextAlignmentOptions.Center);
+            UIFactory.At(empty.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -120f), new Vector2(900f, 40f));
+            spawnedRows.Add(empty.gameObject);
             return;
         }
 

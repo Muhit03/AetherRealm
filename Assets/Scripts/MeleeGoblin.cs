@@ -9,14 +9,14 @@ using AetherRealm;
 /// </summary>
 public class MeleeGoblin : EnemyController
 {
-    public int clubDamage = 8;
+    public int clubDamage = 7;
 
     protected override void Awake()
     {
-        maxHealth = 32;
-        moveSpeed = 3.6f;
+        maxHealth = 30;
+        moveSpeed = 3.5f;
         attackRange = 1.9f;
-        attackCooldown = 1.2f;
+        attackCooldown = 1.4f;
         scoreValue = 10;
         goldValue = 8;
         behaviour = Behaviour.Grunt;

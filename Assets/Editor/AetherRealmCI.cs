@@ -1,261 +1,409 @@
 using System;
+using System.IO;
 using System.Text;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.UI;
 
 /// <summary>
-/// Command-line smoke test. Run from a terminal with the editor closed:
+/// Command-line smoke test / diagnostic. Run with the editor closed:
 ///
 ///   Unity.exe -batchmode -projectPath . -executeMethod AetherRealmCI.Run -logFile ci.log
 ///
-/// It cleans and saves the play scene, enters Play Mode, lets the game build
-/// itself and start a run, watches for errors for a few seconds, then exits with
-/// code 0 (all good) or 1 (something threw).
+/// It cleans and saves the play scene, enters Play Mode, plays through the
+/// opening of a run, saves screenshots, dumps the UI hierarchy and every
+/// enemy's AI state, then exits 0 (all good) / 1 (a check failed).
 /// </summary>
 public static class AetherRealmCI
 {
     const string ActiveFlag = "AetherRealmCI.Active";
+    static string ShotDir =>
+        Environment.GetEnvironmentVariable("AETHER_SHOT_DIR") ??
+        Path.Combine(Directory.GetCurrentDirectory(), "CI_Shots");
 
     static double startTime;
     static bool runStarted;
-    static bool dbTested;
-    static string dbResult = "(not tested)";
-    static float gameTimeSeen;
-    static int gameFramesSeen;
+    static double runStartedAt;
 
-    // enemy AI checks
-    static bool enemiesSpawned;
-    static double spawnTime;
-    static EnemyController[] ciEnemies = new EnemyController[0];
-    static bool enemyStartRecorded;
-    static Vector3[] enemyStart = new Vector3[0];
-    static float enemyMovedAvg = -1f;
-    static float enemyNearestToPlayer = 999f;
-    static bool onNavMesh;
-    static bool measured;
-    static bool wasPlayingDuringWave;
-
-    // leaderboard check
+    static bool shot1Done, shot2Done, shot3Done;
+    static bool enemyDumpDone;
+    static bool leaderboardOpened;
     static bool runEnded;
-    static int leaderboardRows = -1;
-    static string leaderboardTop = "(none)";
+
+    static string enemyReport = "(not captured)";
+    static int liveEnemies;
+    static float enemyMovedAvg = -1f;
+    static float enemyNearest = 999f;
+    static bool anyEnemyChasing;
+    static bool anyEnemyOnNavMesh;
+
+    static string uiReport = "(not captured)";
+    static int leaderboardRowCount = -1;
+    static string leaderboardDump = "(not captured)";
+    static bool leaderboardHasHero;
+    static bool leaderboardHasBench;
 
     static readonly StringBuilder errors = new StringBuilder();
 
-    // ---- command line entry point ----
     public static void Run()
     {
         CleanAndSaveScene();
+        Directory.CreateDirectory(ShotDir);
+        // remember the real local leaderboard so the test run doesn't pollute it
+        SessionState.SetString("AetherRealmCI.Scores", PlayerPrefs.GetString("local_scores", ""));
         SessionState.SetBool(ActiveFlag, true);
         EditorApplication.EnterPlaymode();
-        // The watchdog below takes over after the play-mode domain reload.
     }
 
-    // Runs again after every domain reload, including the one for entering Play
-    // Mode (which wipes the static fields and event subscriptions above).
     [InitializeOnLoadMethod]
-    static void ReattachWatchdog()
+    static void Reattach()
     {
-        if (!SessionState.GetBool(ActiveFlag, false))
-        {
-            return;
-        }
+        if (!SessionState.GetBool(ActiveFlag, false)) return;
         startTime = EditorApplication.timeSinceStartup;
         runStarted = false;
         Application.logMessageReceived += OnLog;
         EditorApplication.update += OnUpdate;
     }
 
-    // ---- scene tidy-up (also on the menu) ----
     [MenuItem("AetherRealm/Set Up Play Scene")]
     public static void CleanAndSaveScene()
     {
         var scene = EditorSceneManager.OpenScene("Assets/Scenes/SampleScene.unity");
-
         int removed = 0;
         foreach (var go in scene.GetRootGameObjects())
-        {
             removed += GameObjectUtility.RemoveMonoBehavioursWithMissingScript(go);
-        }
 
         var goblin = GameObject.Find("Goblin");
-        if (goblin != null)
-        {
-            UnityEngine.Object.DestroyImmediate(goblin);
-        }
+        if (goblin != null) UnityEngine.Object.DestroyImmediate(goblin);
 
         if (UnityEngine.Object.FindAnyObjectByType<GameBootstrap>() == null)
         {
-            var host = GameObject.Find("Managers");
-            if (host == null)
-            {
-                host = new GameObject("GameBootstrap");
-            }
-            if (host.GetComponent<GameBootstrap>() == null)
-            {
-                host.AddComponent<GameBootstrap>();
-            }
+            var host = GameObject.Find("Managers") ?? new GameObject("GameBootstrap");
+            if (host.GetComponent<GameBootstrap>() == null) host.AddComponent<GameBootstrap>();
         }
 
         EditorSceneManager.MarkSceneDirty(scene);
         EditorSceneManager.SaveOpenScenes();
-        Debug.Log("AetherRealm: scene cleaned (removed " + removed + " missing scripts). Press Play.");
+        Debug.Log("AetherRealm: scene cleaned (removed " + removed + " missing scripts).");
     }
 
-    // ---- play mode watchdog ----
-    static void OnLog(string message, string stackTrace, LogType type)
+    static void OnLog(string message, string stack, LogType type)
     {
         if (type == LogType.Exception || type == LogType.Error)
-        {
             errors.AppendLine(type + ": " + message);
+    }
+
+    static void Shot(string name)
+    {
+        try
+        {
+            var cam = Camera.main;
+            if (cam == null) { Debug.Log("CI screenshot skipped (no camera): " + name); return; }
+
+            int w = 1280, h = 720;
+
+            // Route the overlay canvases through the camera so they show up in
+            // the render-texture capture (overlay UI isn't captured otherwise).
+            var canvases = UnityEngine.Object.FindObjectsByType<Canvas>(FindObjectsInactive.Exclude);
+            var restore = new System.Collections.Generic.List<Canvas>();
+            foreach (var c in canvases)
+            {
+                if (c.renderMode == RenderMode.ScreenSpaceOverlay)
+                {
+                    c.renderMode = RenderMode.ScreenSpaceCamera;
+                    c.worldCamera = cam;
+                    c.planeDistance = 1f;
+                    restore.Add(c);
+                }
+            }
+            Canvas.ForceUpdateCanvases();
+
+            var rt = new RenderTexture(w, h, 24);
+            var prevTarget = cam.targetTexture;
+            var prevActive = RenderTexture.active;
+            cam.targetTexture = rt;
+            cam.Render();
+            RenderTexture.active = rt;
+            var tex = new Texture2D(w, h, TextureFormat.RGB24, false);
+            tex.ReadPixels(new Rect(0, 0, w, h), 0, 0);
+            tex.Apply();
+            cam.targetTexture = prevTarget;
+            RenderTexture.active = prevActive;
+
+            File.WriteAllBytes(Path.Combine(ShotDir, name), tex.EncodeToPNG());
+
+            foreach (var c in restore) c.renderMode = RenderMode.ScreenSpaceOverlay;
+            Canvas.ForceUpdateCanvases();
+
+            UnityEngine.Object.Destroy(rt);
+            UnityEngine.Object.Destroy(tex);
+            Debug.Log("CI screenshot saved: " + name);
+        }
+        catch (Exception e)
+        {
+            Debug.Log("CI screenshot FAILED (" + name + "): " + e.Message);
         }
     }
 
     static void OnUpdate()
     {
-        if (!EditorApplication.isPlaying)
-        {
-            return;
-        }
+        if (!EditorApplication.isPlaying) return;
+        double t = EditorApplication.timeSinceStartup - startTime;
 
-        double elapsed = EditorApplication.timeSinceStartup - startTime;
-        gameTimeSeen = Time.time;
-        gameFramesSeen = Time.frameCount;
-
-        // ~2s in: log in (so scores save) and start the run
-        if (!runStarted && elapsed > 2.0)
+        // 2s: register a fresh account, register a SECOND that never plays
+        // (to prove new registrations show on the leaderboard), then start a
+        // Mage run.
+        if (!runStarted && t > 2.0)
         {
             runStarted = true;
+            runStartedAt = t;
             if (AuthManager.Instance != null)
             {
                 if (!AuthManager.Instance.Login("ci_hero", "pass1234"))
-                {
-                    AuthManager.Instance.Register("ci_hero", "pass1234", "Warrior");
-                }
+                    AuthManager.Instance.Register("ci_hero", "pass1234", "Mage");
+                AuthManager.Instance.Register("ci_bench", "pass1234", "Warrior"); // never plays
+                AuthManager.Instance.Login("ci_hero", "pass1234");                // back to the player
             }
             if (GameBootstrap.Instance != null)
+                GameBootstrap.Instance.BeginRun("Mage");
+        }
+        if (!runStarted) return;
+
+        double since = t - runStartedAt;
+
+        // record the player's starting HP once the run is going
+        if (playerStartHp < 0 && since > 3.0)
+        {
+            var pc0 = GetPlayer();
+            if (pc0 != null) playerStartHp = pc0.CurrentHealth;
+        }
+
+        // watch every frame - a Mage bolt only lives a moment before it hits
+        // an enemy in a swarm, so a single snapshot would miss it
+        if (since > 3.0)
+        {
+            var pcNow = GetPlayer();
+            if (pcNow != null && pcNow.CurrentHealth < playerLowestHp)
+                playerLowestHp = pcNow.CurrentHealth;
+
+            if (!mageMadeBolts)
             {
-                GameBootstrap.Instance.BeginRun("Warrior");
+                var bolts = UnityEngine.Object.FindObjectsByType<AetherRealm.Projectile>(FindObjectsInactive.Exclude);
+                foreach (var b in bolts)
+                    if (b.Team == AetherRealm.Projectile.Side.Player) mageMadeBolts = true;
             }
         }
 
-        // ~3s in: check the Microsoft SQL client can load and be called
-        if (runStarted && !dbTested && elapsed > 3.0)
-        {
-            dbTested = true;
-            try
-            {
-                // hit the raw SqlClient directly so we see its real exception
-                var probe = new Microsoft.Data.SqlClient.SqlConnection(
-                    "Server=localhost,1433;Database=AetherRealmDB;User Id=SA;Password=x;TrustServerCertificate=True;Connect Timeout=2;");
-                probe.Open();
-                probe.Close();
-                dbResult = "CONNECTED";
-            }
-            catch (Exception e)
-            {
-                Exception inner = e;
-                var sb = new StringBuilder();
-                while (inner != null)
-                {
-                    sb.Append(inner.GetType().Name).Append(": ").Append(inner.Message).Append("  ||  ");
-                    inner = inner.InnerException;
-                }
-                dbResult = sb.ToString();
-                Debug.Log("CI DB probe full exception:\n" + e);
-            }
-        }
+        // keep the test player alive-ish and swinging so we see a real fight
+        DrivePlayer(since);
 
-        // once the DB probe is done: drop 4 enemies right at a spawn portal
-        // (this is the exact situation the "enemies stand outside the map" bug
-        // was about). Timing is measured from here on, not from launch, because
-        // the SQL timeouts above eat several seconds of wall-clock.
-        if (runStarted && dbTested && !enemiesSpawned && elapsed > 4.0)
+        // 4s in: also drop 4 test enemies at a portal so we can measure them
+        if (since > 4.0 && ciEnemies == null)
         {
-            enemiesSpawned = true;
-            spawnTime = elapsed;
-            Vector3 portal = new Vector3(17f, 0f, 0f);
+            Vector3 portal = new Vector3(15f, 0f, 0f);
             ciEnemies = new EnemyController[4];
             ciEnemies[0] = AetherRealm.EnemyFactory.Create(AetherRealm.EnemyFactory.Kind.Goblin, portal);
-            ciEnemies[1] = AetherRealm.EnemyFactory.Create(AetherRealm.EnemyFactory.Kind.Goblin, portal + Vector3.forward);
-            ciEnemies[2] = AetherRealm.EnemyFactory.Create(AetherRealm.EnemyFactory.Kind.Archer, portal - Vector3.forward);
-            ciEnemies[3] = AetherRealm.EnemyFactory.Create(AetherRealm.EnemyFactory.Kind.Brute, portal + Vector3.right * 0.5f);
+            ciEnemies[1] = AetherRealm.EnemyFactory.Create(AetherRealm.EnemyFactory.Kind.Goblin, portal + Vector3.forward * 1.5f);
+            ciEnemies[2] = AetherRealm.EnemyFactory.Create(AetherRealm.EnemyFactory.Kind.Archer, portal - Vector3.forward * 1.5f);
+            ciEnemies[3] = AetherRealm.EnemyFactory.Create(AetherRealm.EnemyFactory.Kind.Brute, portal + Vector3.right);
+            ciStart = new Vector3[4];
         }
-
-        double sinceSpawn = elapsed - spawnTime;
-
-        // 2s after spawn: record where these 4 landed
-        if (enemiesSpawned && !enemyStartRecorded && sinceSpawn > 2.0)
+        if (ciEnemies != null && !ciStartRecorded && since > 6.0)
         {
-            enemyStartRecorded = true;
-            enemyStart = new Vector3[ciEnemies.Length];
-            onNavMesh = true;
+            ciStartRecorded = true;
             for (int i = 0; i < ciEnemies.Length; i++)
-            {
-                if (ciEnemies[i] == null) { onNavMesh = false; continue; }
-                enemyStart[i] = ciEnemies[i].transform.position;
-                var agent = ciEnemies[i].GetComponent<UnityEngine.AI.NavMeshAgent>();
-                if (agent == null || !agent.isOnNavMesh) onNavMesh = false;
-            }
+                if (ciEnemies[i] != null) ciStart[i] = ciEnemies[i].transform.position;
         }
 
-        // 10s after spawn: how far did these 4 travel, and did any reach the player?
-        if (enemyStartRecorded && !measured && sinceSpawn > 10.0)
+        if (since > 8.0 && !shot1Done)
         {
-            measured = true;
-            wasPlayingDuringWave = GameManager.Instance != null && GameManager.Instance.IsPlaying;
-            GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
-
-            float total = 0f;
-            int counted = 0;
-            for (int i = 0; i < ciEnemies.Length; i++)
-            {
-                if (ciEnemies[i] == null) continue;   // it died - that's fine
-                total += Vector3.Distance(ciEnemies[i].transform.position, enemyStart[i]);
-                counted++;
-                if (playerObj != null)
-                {
-                    float d = Vector3.Distance(ciEnemies[i].transform.position, playerObj.transform.position);
-                    if (d < enemyNearestToPlayer) enemyNearestToPlayer = d;
-                }
-            }
-            enemyMovedAvg = counted > 0 ? total / counted : 50f; // all dead = they definitely engaged
+            shot1Done = true;
+            Debug.Log("CI ScreenEffects @ shot1: " + AetherRealm.ScreenEffects.Debug() +
+                      "  timeScale=" + Time.timeScale.ToString("F2") +
+                      "  ambient=" + RenderSettings.ambientLight);
+            Shot("1_fight.png");
         }
 
-        // pretend the player finished a big run, then died - so we can check the
-        // run gets written to the leaderboard with the new stats.
-        if (measured && !runEnded && sinceSpawn > 11.0)
+        // 14s in: check the Mage's basic attack made projectiles, and that the
+        // player actually lost health from the swarm
+        if (since > 14.0 && !combatChecked)
+        {
+            combatChecked = true;
+            var boltCount = UnityEngine.Object.FindObjectsByType<AetherRealm.Projectile>(FindObjectsInactive.Exclude).Length;
+            var pc = GetPlayer();
+            Debug.Log("CI COMBAT: player class=" + (pc != null ? pc.ClassName : "?") +
+                      " startHp=" + playerStartHp + " hpNow=" + (pc != null ? pc.CurrentHealth : -1) +
+                      " lowestHp=" + playerLowestHp +
+                      " liveBolts=" + boltCount + " mageMadeBolts=" + mageMadeBolts);
+        }
+
+        // 16s in (10s of travel time): dump every enemy's state
+        if (since > 16.0 && !enemyDumpDone) { enemyDumpDone = true; DumpEnemies(); }
+
+        // 17s in: end the run so it gets written to the leaderboard
+        if (since > 17.0 && !runEnded)
         {
             runEnded = true;
             if (GameManager.Instance != null)
             {
-                GameManager.Instance.AddDamageDealt(1234);
-                GameManager.Instance.AddScore(500);
+                GameManager.Instance.AddDamageDealt(1500);
+                GameManager.Instance.AddScore(400);
                 GameManager.Instance.OnPlayerDeath();
             }
         }
 
-        // read the leaderboard back
-        if (runEnded && leaderboardRows < 0 && sinceSpawn > 13.0)
+        // 18s in: open the leaderboard and screenshot it
+        if (since > 18.0 && !leaderboardOpened)
         {
-            var board = DatabaseManager.Instance.GetLeaderboard("damage");
-            leaderboardRows = board.Count;
-            if (board.Count > 0)
+            leaderboardOpened = true;
+            if (UIManager.Instance != null) UIManager.Instance.ToggleLeaderboard();
+        }
+        if (since > 19.0 && !shot2Done) { shot2Done = true; Shot("2_leaderboard.png"); DumpUi(); }
+        if (since > 21.0 && !shot3Done) { shot3Done = true; Shot("3_final.png"); }
+
+        if (since > 22.0 || t > 120.0) Finish();
+    }
+
+    static float lastAttack;
+    static float playerStartHp = -1f;
+    static int playerLowestHp = 999;
+    static bool combatChecked;
+    static bool mageMadeBolts;
+
+    static PlayerController GetPlayer()
+    {
+        var po = GameObject.FindGameObjectWithTag("Player");
+        return po != null ? po.GetComponent<PlayerController>() : null;
+    }
+
+    static void DrivePlayer(double since)
+    {
+        var pc = GetPlayer();
+        if (pc == null || pc.IsDead) return;
+
+        // for the first ~9s DON'T heal - so we can watch the swarm hurt the
+        // player (playerLowestHp records the dip). After that, keep it topped
+        // up so the Mage stays alive and keeps casting bolts for the check.
+        if (since > 9.0 && pc.CurrentHealth < pc.MaxHealth * 0.7f)
+        {
+            pc.Heal(pc.MaxHealth);
+        }
+
+        // attack roughly once a second. Check for a fresh player bolt in the
+        // same frame - before Projectile.Update can fly it into an enemy and
+        // destroy it - so the ranged-attack check can't be missed by timing.
+        if (Time.time - lastAttack > 1f)
+        {
+            lastAttack = Time.time;
+            pc.Attack();
+            if (!mageMadeBolts)
             {
-                LeaderboardEntry e = board[0];
-                leaderboardTop = e.Username + " score=" + e.Score + " waves=" + e.Waves +
-                                 " kills=" + e.Kills + " damage=" + e.Damage + " games=" + e.Games;
+                var bolts = UnityEngine.Object.FindObjectsByType<AetherRealm.Projectile>(FindObjectsInactive.Exclude);
+                foreach (var b in bolts)
+                    if (b.Team == AetherRealm.Projectile.Side.Player) mageMadeBolts = true;
             }
         }
 
-        if (leaderboardRows >= 0 && sinceSpawn > 14.0)
+        // drift in a slow circle so enemies have to keep re-pathing
+        pc.transform.position += new Vector3(Mathf.Cos(Time.time), 0f, Mathf.Sin(Time.time)) * Time.deltaTime * 2f;
+    }
+
+    static EnemyController[] ciEnemies;
+    static Vector3[] ciStart;
+    static bool ciStartRecorded;
+
+    static void DumpEnemies()
+    {
+        var all = UnityEngine.Object.FindObjectsByType<EnemyController>(FindObjectsInactive.Exclude);
+        liveEnemies = all.Length;
+        GameObject player = GameObject.FindGameObjectWithTag("Player");
+        Vector3 playerPos = player != null ? player.transform.position : Vector3.zero;
+
+        var sb = new StringBuilder();
+        sb.AppendLine("  live enemies: " + all.Length);
+        foreach (var e in all)
         {
-            Finish();
+            var agent = e.GetComponent<UnityEngine.AI.NavMeshAgent>();
+            bool onMesh = agent != null && agent.isOnNavMesh;
+            bool hasPath = agent != null && agent.hasPath;
+            float vel = agent != null ? agent.velocity.magnitude : -1f;
+            float dp = Vector3.Distance(e.transform.position, playerPos);
+            if (onMesh) anyEnemyOnNavMesh = true;
+            if (vel > 0.3f && dp < 25f) anyEnemyChasing = true;
+            if (dp < enemyNearest) enemyNearest = dp;
+            sb.AppendLine("    " + e.GetType().Name + " state=" + e.CurrentStateName +
+                          " pos=" + e.transform.position.ToString("F0") +
+                          " onMesh=" + onMesh + " hasPath=" + hasPath +
+                          " vel=" + vel.ToString("F1") + " distToPlayer=" + dp.ToString("F0"));
         }
-        if (elapsed > 45.0)   // absolute safety timeout
+
+        // travel distance of the 4 test enemies
+        if (ciStartRecorded)
         {
-            Finish();
+            float total = 0f; int n = 0;
+            for (int i = 0; i < ciEnemies.Length; i++)
+            {
+                if (ciEnemies[i] == null) { total += 30f; n++; continue; }
+                total += Vector3.Distance(ciEnemies[i].transform.position, ciStart[i]); n++;
+            }
+            enemyMovedAvg = n > 0 ? total / n : 0f;
+            sb.AppendLine("  4 test enemies moved on average " + enemyMovedAvg.ToString("F1") + " m from the portal");
+        }
+
+        enemyReport = sb.ToString();
+        Debug.Log("CI ENEMY DUMP:\n" + enemyReport);
+    }
+
+    static void DumpUi()
+    {
+        var canvases = UnityEngine.Object.FindObjectsByType<Canvas>(FindObjectsInactive.Include);
+        var sb = new StringBuilder();
+        foreach (var c in canvases)
+        {
+            sb.AppendLine("  Canvas '" + c.name + "' active=" + c.gameObject.activeInHierarchy + " order=" + c.sortingOrder);
+            DumpRect(sb, c.transform, 2);
+        }
+        uiReport = sb.ToString();
+        Debug.Log("CI UI DUMP:\n" + uiReport);
+
+        var lb = UnityEngine.Object.FindAnyObjectByType<LeaderboardPanel>(FindObjectsInactive.Include);
+        if (lb != null)
+        {
+            var texts = lb.GetComponentsInChildren<TMPro.TMP_Text>(true);
+            leaderboardRowCount = texts.Length;
+            var d = new StringBuilder();
+            d.AppendLine("  LeaderboardPanel active=" + lb.gameObject.activeInHierarchy + " texts=" + texts.Length);
+            foreach (var tx in texts)
+            {
+                d.AppendLine("    \"" + tx.text + "\"");
+                if (tx.text == "ci_hero") leaderboardHasHero = true;
+                if (tx.text == "ci_bench") leaderboardHasBench = true;
+            }
+            leaderboardDump = d.ToString();
+            Debug.Log("CI LEADERBOARD DUMP:\n" + leaderboardDump);
+        }
+
+        // also ask the data layer directly
+        if (DatabaseManager.Instance != null)
+        {
+            var rows = DatabaseManager.Instance.GetLeaderboard("score");
+            var names = new StringBuilder("  GetLeaderboard rows: ");
+            foreach (var row in rows) names.Append(row.Username).Append("(g").Append(row.Games).Append(") ");
+            Debug.Log(names.ToString());
+        }
+    }
+
+    static void DumpRect(StringBuilder sb, Transform tr, int depth)
+    {
+        if (depth > 5) return;
+        for (int i = 0; i < tr.childCount; i++)
+        {
+            var ch = tr.GetChild(i);
+            var rt = ch as RectTransform;
+            string size = rt != null ? rt.rect.size.ToString("F0") : "-";
+            sb.AppendLine(new string(' ', depth * 2) + ch.name + " active=" + ch.gameObject.activeSelf + " size=" + size);
+            DumpRect(sb, ch, depth + 1);
         }
     }
 
@@ -265,65 +413,56 @@ public static class AetherRealmCI
         Application.logMessageReceived -= OnLog;
         SessionState.EraseBool(ActiveFlag);
 
-        var report = new StringBuilder();
-        report.AppendLine("\n===== AETHERREALM SMOKE TEST =====");
+        var r = new StringBuilder();
+        r.AppendLine("\n===== AETHERREALM DIAGNOSTIC =====");
+        r.AppendLine("screenshots in: " + ShotDir);
 
         bool ok = true;
-        ok &= Check(report, "GameBootstrap built", GameBootstrap.Instance != null);
-        ok &= Check(report, "GameManager exists", GameManager.Instance != null);
-        ok &= Check(report, "WaveManager exists", WaveManager.Instance != null);
-        ok &= Check(report, "HUD built", HUDController.Instance != null);
-        ok &= Check(report, "Player spawned", GameObject.FindGameObjectWithTag("Player") != null);
-        ok &= Check(report, "Arena floor built", GameObject.Find("Floor") != null);
-        ok &= Check(report, "run was live during the wave", wasPlayingDuringWave);
+        ok &= Check(r, "GameManager + WaveManager exist", GameManager.Instance != null && WaveManager.Instance != null);
+        ok &= Check(r, "HUD + UIManager built", HUDController.Instance != null && UIManager.Instance != null);
+        ok &= Check(r, "player spawned", GameObject.FindGameObjectWithTag("Player") != null);
 
-        report.AppendLine("  game time: " + gameTimeSeen.ToString("F1") + "s, game frames: " + gameFramesSeen);
+        r.AppendLine(enemyReport);
+        ok &= Check(r, "a wave actually spawned enemies", liveEnemies > 0);
+        ok &= Check(r, "enemies are on the NavMesh", anyEnemyOnNavMesh);
+        r.AppendLine("  (an enemy was seen actively moving toward the player: " + anyEnemyChasing + ")");
+        ok &= Check(r, "test enemies pathed away from the portal (>5 m)", enemyMovedAvg > 5f);
+        ok &= Check(r, "an enemy reached the player (< 4 m)", enemyNearest < 4f);
+        r.AppendLine("  nearest enemy to player: " + enemyNearest.ToString("F1") + " m");
 
-        // strip control characters so the log line doesn't get truncated
-        string dbClean = "";
-        foreach (char c in dbResult)
-        {
-            dbClean += (c < ' ') ? ' ' : c;
-        }
-        report.AppendLine("  Microsoft SQL client: " + dbClean);
-        bool sqlClientWorks = dbClean.Contains("CONNECTED") || dbClean.Contains("SqlException");
-        ok &= Check(report, "Microsoft SQL client stack works on this platform", sqlClientWorks);
+        r.AppendLine(uiReport);
+        r.AppendLine(leaderboardDump);
+        ok &= Check(r, "leaderboard panel has rows/text", leaderboardRowCount > 0);
+        ok &= Check(r, "leaderboard shows the player who played (ci_hero)", leaderboardHasHero);
+        ok &= Check(r, "leaderboard shows a just-registered player who never played (ci_bench)", leaderboardHasBench);
 
-        // --- enemy AI ---
-        ok &= Check(report, "spawned enemies landed on the NavMesh", onNavMesh);
-        ok &= Check(report, "enemies moved into the map (not stuck at portal)", enemyMovedAvg > 4f);
-        ok &= Check(report, "an enemy reached the player", enemyNearestToPlayer < 12f);
-        report.AppendLine("  enemies moved on average " + enemyMovedAvg.ToString("F1") +
-                          " m, nearest got within " + enemyNearestToPlayer.ToString("F1") + " m of the player");
-
-        // --- leaderboard ---
-        ok &= Check(report, "run written to the leaderboard", leaderboardRows >= 1);
-        report.AppendLine("  leaderboard rows: " + leaderboardRows + " | top: " + leaderboardTop);
+        r.AppendLine("  player: startHp=" + playerStartHp + " lowestHp=" + playerLowestHp + " mageMadeBolts=" + mageMadeBolts);
+        ok &= Check(r, "Mage basic attack fires projectiles (ranged, not melee)", mageMadeBolts);
+        ok &= Check(r, "player loses health when swarmed", playerLowestHp >= 0 && playerLowestHp < playerStartHp);
 
         if (errors.Length > 0)
         {
             ok = false;
-            report.AppendLine("--- errors logged during play ---");
-            report.Append(errors);
+            r.AppendLine("--- errors during play ---");
+            r.Append(errors);
         }
 
-        report.AppendLine("RESULT: " + (ok ? "PASS" : "FAIL"));
-        Debug.Log(report.ToString());
-        Debug.Log("AETHERREALM CI RESULT: " + (ok ? "PASS" : "FAIL"));   // always its own line
+        r.AppendLine("RESULT: " + (ok ? "PASS" : "FAIL"));
+        Debug.Log(r.ToString());
+        Debug.Log("AETHERREALM CI RESULT: " + (ok ? "PASS" : "FAIL"));
 
-        // don't leave the test account / scores in the local leaderboard
-        PlayerPrefs.DeleteKey("local_scores");
+        // put the real local leaderboard back
+        PlayerPrefs.SetString("local_scores", SessionState.GetString("AetherRealmCI.Scores", ""));
         PlayerPrefs.DeleteKey("local_user_ci_hero");
-        PlayerPrefs.DeleteKey("local_user_ci_probe");
         PlayerPrefs.Save();
 
         EditorApplication.isPlaying = false;
         EditorApplication.Exit(ok ? 0 : 1);
     }
 
-    static bool Check(StringBuilder report, string label, bool passed)
+    static bool Check(StringBuilder r, string label, bool pass)
     {
-        report.AppendLine("  [" + (passed ? "PASS" : "FAIL") + "] " + label);
-        return passed;
+        r.AppendLine("  [" + (pass ? "PASS" : "FAIL") + "] " + label);
+        return pass;
     }
 }

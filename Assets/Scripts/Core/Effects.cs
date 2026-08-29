@@ -78,20 +78,38 @@ namespace AetherRealm
             }
         }
 
+        Coroutine freezeRoutine;
+
         public static void FreezeFrame(float seconds)
         {
-            Instance.StartCoroutine(Instance.FreezeRoutine(seconds));
+            // never hit-stop while the game is paused
+            if (Time.timeScale < 0.01f)
+            {
+                return;
+            }
+            if (Instance.freezeRoutine != null)
+            {
+                Instance.StopCoroutine(Instance.freezeRoutine);
+            }
+            Instance.freezeRoutine = Instance.StartCoroutine(Instance.FreezeRoutine(seconds));
         }
 
         IEnumerator FreezeRoutine(float seconds)
         {
-            if (Time.timeScale < 0.9f)
-            {
-                yield break;
-            }
-            Time.timeScale = 0.05f;
-            yield return new WaitForSecondsRealtime(seconds);
+            Time.timeScale = 0.15f;
+            yield return new WaitForSecondsRealtime(Mathf.Min(seconds, 0.08f));
             Time.timeScale = 1f;
+            freezeRoutine = null;
+        }
+
+        void Update()
+        {
+            // safety net: if we somehow got left in slow motion with no freeze
+            // running and the game isn't paused, snap back to normal speed.
+            if (freezeRoutine == null && Time.timeScale > 0.02f && Time.timeScale < 0.95f)
+            {
+                Time.timeScale = 1f;
+            }
         }
 
         public static void FloatingLabel(Vector3 position, string message, Color color, float size)

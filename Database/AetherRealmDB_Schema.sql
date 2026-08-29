@@ -291,18 +291,19 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
+    -- LEFT JOIN so that a freshly-registered player with no runs still appears
     ;WITH PlayerBest AS
     (
         SELECT p.PlayerId,
                p.Username,
                p.ClassType,
-               MAX(lb.Score)  AS Score,
-               MAX(lb.Waves)  AS Waves,
-               MAX(lb.Kills)  AS Kills,
-               MAX(lb.Damage) AS Damage,
-               COUNT(*)       AS Games
+               ISNULL(MAX(lb.Score),  0) AS Score,
+               ISNULL(MAX(lb.Waves),  0) AS Waves,
+               ISNULL(MAX(lb.Kills),  0) AS Kills,
+               ISNULL(MAX(lb.Damage), 0) AS Damage,
+               COUNT(lb.EntryId)         AS Games
         FROM   dbo.Players     p
-        JOIN   dbo.Leaderboard lb ON lb.PlayerId = p.PlayerId
+        LEFT JOIN dbo.Leaderboard lb ON lb.PlayerId = p.PlayerId
         GROUP BY p.PlayerId, p.Username, p.ClassType
     )
     SELECT TOP 20

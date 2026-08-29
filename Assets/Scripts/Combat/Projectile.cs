@@ -16,6 +16,8 @@ namespace AetherRealm
         float timeLeft;
         GameObject firedBy;
 
+        public Side Team { get { return side; } }
+
         public static Projectile Spawn(Vector3 position, Vector3 direction, Side side, int damage, float speed, Color color, GameObject firedBy)
         {
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Sphere);

@@ -271,8 +271,7 @@ public class GameBootstrap : MonoBehaviour
         if (DialoguePanel.Instance != null)
         {
             DialoguePanel.Instance.Say("Elder Eldrin",
-                "The horde pours from the portals. Hold the arena, hero. Come to me between " +
-                "waves and I will make you stronger.");
+                "Hold the arena, hero. Come to me between waves and I will make you stronger.");
         }
     }
 

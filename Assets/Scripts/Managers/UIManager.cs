@@ -26,6 +26,15 @@ public class UIManager : MonoBehaviour
         Instance = this;
     }
 
+    void Update()
+    {
+        // Tab toggles the leaderboard from anywhere (menu, in-game, dead).
+        if (Input.GetKeyDown(KeyCode.Tab))
+        {
+            ToggleLeaderboard();
+        }
+    }
+
     void Set(GameObject go, bool on) { if (go != null) go.SetActive(on); }
 
     public void ShowMainMenu()

@@ -138,9 +138,9 @@ public class WaveManager : MonoBehaviour
     {
         List<EnemyFactory.Kind> plan = new List<EnemyFactory.Kind>();
 
-        int goblins = 3 + wave;                 // 4, 5, 6, 7 ...
-        int archers = wave >= 3 ? wave - 1 : 0; // start at wave 3
-        int brutes  = wave >= 4 ? (wave - 3) : 0;   // start at wave 4
+        int goblins = 2 + wave;                    // 3, 4, 5, 6 ...
+        int archers = wave >= 3 ? wave - 2 : 0;    // 1, 2, 3 ... from wave 3
+        int brutes  = wave >= 4 ? wave - 3 : 0;    // 1, 2, 3 ... from wave 4
 
         for (int i = 0; i < goblins; i++) plan.Add(EnemyFactory.Kind.Goblin);
         for (int i = 0; i < archers; i++) plan.Add(EnemyFactory.Kind.Archer);

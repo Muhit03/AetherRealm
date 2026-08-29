@@ -7,21 +7,24 @@ using Microsoft.Data.SqlClient;
 using UnityEngine;
 
 /// <summary>
-/// Connects the game to a Microsoft SQL Server database and calls its stored
-/// procedures with parameterised commands.
+/// Connects the game to a Microsoft SQL Server database (SQL Server Express /
+/// Developer / LocalDB - no Docker) and calls its stored procedures with
+/// parameterised commands.
 ///
-/// If the database can't be reached (server down, or the SQL client isn't
-/// supported on this machine) every method quietly falls back to
-/// <see cref="LocalStore"/> so the game still runs. <see cref="OfflineMode"/>
-/// says which one is in use.
+/// The connection string is read from <c>StreamingAssets/db_config.txt</c> so it
+/// can be changed without recompiling. If the database can't be reached every
+/// method quietly falls back to <see cref="LocalStore"/> so the game still runs;
+/// <see cref="OfflineMode"/> says which one is in use.
 /// </summary>
 public class DatabaseManager : MonoBehaviour
 {
     public static DatabaseManager Instance;
 
-    [SerializeField]
-    private string connectionString =
-        "Server=localhost,1433;Database=AetherRealmDB;User Id=SA;Password=AetherRealm@2024;TrustServerCertificate=True;Connect Timeout=3;";
+    // Fallback if StreamingAssets/db_config.txt is missing.
+    const string DefaultConnectionString =
+        "Server=localhost;Database=AetherRealmDB;Trusted_Connection=True;TrustServerCertificate=True;Connect Timeout=3;";
+
+    string connectionString = DefaultConnectionString;
 
     /// <summary>True once a database call has failed and we've switched to the local fallback.</summary>
     public static bool OfflineMode { get; private set; }
@@ -72,6 +75,34 @@ public class DatabaseManager : MonoBehaviour
         }
         Instance = this;
         DontDestroyOnLoad(gameObject);
+
+        LoadConnectionString();
+    }
+
+    // Read the connection string from StreamingAssets/db_config.txt (the first
+    // non-empty line that isn't a comment).
+    void LoadConnectionString()
+    {
+        try
+        {
+            string path = Path.Combine(Application.streamingAssetsPath, "db_config.txt");
+            if (File.Exists(path))
+            {
+                foreach (string line in File.ReadAllLines(path))
+                {
+                    string trimmed = line.Trim();
+                    if (trimmed.Length > 0 && !trimmed.StartsWith("#") && trimmed.Contains("="))
+                    {
+                        connectionString = trimmed;
+                        return;
+                    }
+                }
+            }
+        }
+        catch (Exception error)
+        {
+            Debug.LogWarning("Could not read db_config.txt, using the default connection string. " + error.Message);
+        }
     }
 
     private SqlConnection GetConnection()

@@ -167,27 +167,37 @@ public class GameManager : MonoBehaviour
             score += 1000;
         }
 
+        SaveRunToLeaderboard();
         int waves = WavesCleared;
+        if (UIManager.Instance != null) UIManager.Instance.ShowEndScreen(won, score, kills, waves);
+    }
 
-        // save the run to the leaderboard (SQL Server, or the local fallback)
+    // Writes the current run to the leaderboard (SQL Server, or the local
+    // fallback). Called on death, victory, and when quitting mid-run.
+    void SaveRunToLeaderboard()
+    {
+        if (score <= 0 && kills <= 0)
+        {
+            return; // nothing worth recording
+        }
         if (AuthManager.IsLoggedIn && DatabaseManager.Instance != null)
         {
             try
             {
-                DatabaseManager.Instance.SaveScore(AuthManager.CurrentPlayerId, score, kills, waves, damageDealt, SecondsPlayed);
+                DatabaseManager.Instance.SaveScore(
+                    AuthManager.CurrentPlayerId, score, kills, WavesCleared, damageDealt, SecondsPlayed);
             }
             catch (Exception error)
             {
                 Debug.LogWarning("Could not save score: " + error.Message);
             }
         }
-
         if (LeaderboardManager.Instance != null) LeaderboardManager.Instance.Refresh();
-        if (UIManager.Instance != null) UIManager.Instance.ShowEndScreen(won, score, kills, waves);
     }
 
     public void Restart()
     {
+        if (IsPlaying) { state = RunState.Lost; SaveRunToLeaderboard(); }
         Time.timeScale = 1f;
         ScreenEffects.FadeOut();
         SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
@@ -195,6 +205,7 @@ public class GameManager : MonoBehaviour
 
     public void QuitToMenu()
     {
+        if (IsPlaying) { state = RunState.Lost; SaveRunToLeaderboard(); }
         Time.timeScale = 1f;
         SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
     }

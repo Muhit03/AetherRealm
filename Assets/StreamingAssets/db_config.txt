@@ -1,0 +1,15 @@
+# AetherRealm database connection string.
+# Edit this line, save, and restart the game. No recompile needed.
+#
+# Examples (Microsoft SQL Server, no Docker):
+#   Default instance, Windows login:
+#     Server=localhost;Database=AetherRealmDB;Trusted_Connection=True;TrustServerCertificate=True;Connect Timeout=3;
+#   SQL Server Express (named instance), Windows login:
+#     Server=localhost\SQLEXPRESS;Database=AetherRealmDB;Trusted_Connection=True;TrustServerCertificate=True;Connect Timeout=3;
+#   SQL login (SA):
+#     Server=localhost;Database=AetherRealmDB;User Id=SA;Password=YourPassword;TrustServerCertificate=True;Connect Timeout=3;
+#
+# If SQL Server can't be reached the game still runs and saves everything
+# locally instead.
+
+Server=localhost;Database=AetherRealmDB;Trusted_Connection=True;TrustServerCertificate=True;Connect Timeout=3;

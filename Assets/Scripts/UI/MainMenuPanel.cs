@@ -23,12 +23,13 @@ public class MainMenuPanel : MonoBehaviour
         var sub = UIFactory.Label(root, "Arena of the Fallen Star", 40, TextAlignmentOptions.Center);
         UIFactory.At(sub.rectTransform, new Vector2(0.5f, 0.62f), Vector2.zero, new Vector2(1200f, 60f));
 
-        MenuButton(root, "ENTER THE ARENA", 0f, () => UIManager.Instance.ShowLoginPanel());
-        MenuButton(root, "HOW TO PLAY", -104f, ToggleTips);
-        MenuButton(root, "QUIT", -196f, Quit);
+        MenuButton(root, "ENTER THE ARENA", 40f, () => UIManager.Instance.ShowLoginPanel());
+        MenuButton(root, "LEADERBOARD", -52f, () => UIManager.Instance.ToggleLeaderboard());
+        MenuButton(root, "HOW TO PLAY", -144f, ToggleTips);
+        MenuButton(root, "QUIT", -236f, Quit);
 
         _tip = UIFactory.Label(root, TipText(), 30, TextAlignmentOptions.Center);
-        UIFactory.At(_tip.rectTransform, new Vector2(0.5f, 0.16f), Vector2.zero, new Vector2(1400f, 240f));
+        UIFactory.At(_tip.rectTransform, new Vector2(0.5f, 0.14f), Vector2.zero, new Vector2(1400f, 240f));
         _tip.gameObject.SetActive(false);
     }
 

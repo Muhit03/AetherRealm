@@ -11,7 +11,8 @@ is also a complete game you can actually play.
 
 ## ▶️ How to run it
 
-1. Start the SQL Server database (see **Database** below).
+1. *(Optional)* set up SQL Server — see **Database** below. The game runs fine
+   without it (everything saves locally instead).
 2. Open the project in Unity Hub (**Unity 6000.5.10f1**).
 3. Press **Play**.
 
@@ -29,8 +30,8 @@ and removes an old "missing script" warning. It is not required.)*
 | **Left Mouse** | Attack (3-hit combo) |
 | **Space** | Dodge roll (short invincibility) |
 | **Q** or **Right Mouse** | Class ability |
-| **E** | Talk to Elder Eldrin / open chests |
-| **Tab** | Leaderboard |
+| **E** | Talk to Elder Eldrin / open chests / skip dialogue |
+| **Tab** | Leaderboard (also a button on the main menu) |
 | **Esc** | Pause |
 | **F** | Skip the shop break between waves |
 
@@ -47,8 +48,16 @@ tougher stats and new enemy types:
 | **Ogre Warlord** (wave 8) | Boss. Ground-slam AoE, never blocks. Beat it to win. |
 
 A big unblocked hit **staggers** any non-boss enemy for a moment. Kills drop
-gold; spend it at Elder Eldrin's shop between waves. Every finished run is saved
-to the leaderboard.
+gold; spend it at Elder Eldrin's shop between waves. Every run is saved to the
+leaderboard (on death, victory, or quitting), and the leaderboard lists **every
+registered player** — a new account shows up immediately with zeros.
+
+### Classes
+
+| | Basic attack (Left Mouse) | Ability (Q / Right Mouse) | Toughness |
+|---|---|---|---|
+| **Warrior** | Melee sword swing (3-hit combo) | Shield-bash shockwave | Armour soaks 4 off every hit |
+| **Mage** | **Ranged** magic bolt toward the cursor | Fan of 5 bolts (costs mana) | Mana soaks 3 off every hit until it runs out |
 
 ---
 
@@ -85,40 +94,37 @@ Other things worth mentioning in a viva:
 
 ---
 
-## 🗄️ Database (Microsoft SQL Server)
+## 🗄️ Database (Microsoft SQL Server — no Docker)
 
-Uses **`Microsoft.Data.SqlClient` 3.1.5** — the current Microsoft client library.
-(`System.Data.SqlClient` is deprecated and throws `PlatformNotSupportedException`
-on Windows ARM64, which is this machine.) The library plus its dependencies and
-the native networking DLLs (`Microsoft.Data.SqlClient.SNI.arm64/x64/x86.dll`) are
-all in `Assets/Plugins/SqlClient/`. `DatabaseManager`'s static constructor points
-Windows at that folder so the native DLL is found.
+Uses **`Microsoft.Data.SqlClient` 3.1.5** (the current Microsoft client library —
+`System.Data.SqlClient` is deprecated and doesn't run on Windows ARM64). The
+library + native networking DLLs are in `Assets/Plugins/SqlClient/`.
 
-Verified working on Windows ARM64: the client loads, the native TCP provider
-engages, and it makes a real connection attempt.
+### Set it up
 
-### Windows
-1. Open **Docker Desktop**.
-2. Run `Database/setup_docker_sql.bat`.
+1. Install **SQL Server Express** (or Developer). LocalDB also works.
+   *(sqlcmd / SSMS gives you the command-line tools.)*
+2. Create the database:
+   ```bat
+   Database\setup_database.bat
+   ```
+   If your instance isn't the default one, open that file and change
+   `set SERVER=localhost` to e.g. `set SERVER=localhost\SQLEXPRESS`.
+3. Tell the game where the server is — edit the one connection-string line in
+   **`Assets/StreamingAssets/db_config.txt`** (no recompile needed). Examples are
+   in that file. The default is `Server=localhost;…;Trusted_Connection=True`.
 
-### macOS
-1. Open **Docker Desktop**.
-2. `bash Database/setup_docker_sql.sh`
-
-The connection string is on the `DatabaseManager` component
-(`Server=localhost,1433; Database=AetherRealmDB; User Id=SA; …`). Schema and
-stored procedures are in `Database/AetherRealmDB_Schema.sql`.
+Schema + stored procedures: `Database/AetherRealmDB_Schema.sql` (re-running it is
+safe and adds any new columns).
 
 ### Offline fallback
 
-If the database can't be reached, `DatabaseManager` automatically switches to
-`LocalStore` (Unity `PlayerPrefs`): accounts and the top-10 leaderboard are kept
-on your PC and the game plays exactly the same. The HUD shows `(offline)` next
-to your name so you know which one is active. The SQL code path is still the
-real one whenever the server is up.
+If the database can't be reached, `DatabaseManager` automatically uses
+`LocalStore` (Unity `PlayerPrefs`) instead — accounts and the leaderboard are
+kept on your PC and the game plays identically. The HUD shows `(offline)` next
+to your name. The SQL code path is the real one whenever the server is up.
 
-(The very first login/register attempt waits ~3 seconds for the server before
-falling back — after that it's instant.)
+(The first login attempt waits up to ~3 s for the server before falling back.)
 
 ---
 

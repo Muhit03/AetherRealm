@@ -3,21 +3,23 @@ using UnityEngine.UI;
 
 namespace AetherRealm
 {
-    // Full-screen colour overlays: a red flash when the player is hit, a red
-    // edge when health is low, and a black fade for starting/restarting.
-    // Creates its own canvas the first time it is used.
+    // Full-screen overlays, kept deliberately subtle:
+    //  - a quick faint red flash when the player is hit
+    //  - a faint red pulse while health is low
+    //  - a black fade for starting / restarting
+    // Lives on its own canvas UNDER the main UI so it never tints the HUD text.
     public class ScreenEffects : MonoBehaviour
     {
         static ScreenEffects instance;
 
-        Image hurtImage;
-        Image lowHealthImage;
-        Image fadeImage;
+        Image redImage;    // hit flash + low-health pulse (behind the HUD)
+        Image fadeImage;    // black fade (in front of everything)
 
-        float hurtAlpha;
+        float hitAmount;
         bool lowHealth;
-        float fadeAlpha = 1f;
+        float fadeAmount = 1f;
         float fadeTarget;
+        float pulse;
 
         static ScreenEffects Instance
         {
@@ -36,23 +38,26 @@ namespace AetherRealm
 
         void Build()
         {
-            GameObject canvasObject = new GameObject("Canvas");
+            // red overlay sits behind the HUD (order 90 < GameCanvas 100)
+            redImage = MakeOverlay("RedCanvas", 90);
+            redImage.color = new Color(0.7f, 0.05f, 0.05f, 0f);
+
+            // black fade sits on top of everything
+            fadeImage = MakeOverlay("FadeCanvas", 950);
+            fadeImage.color = new Color(0f, 0f, 0f, 1f);
+        }
+
+        Image MakeOverlay(string name, int order)
+        {
+            GameObject canvasObject = new GameObject(name);
             canvasObject.transform.SetParent(transform, false);
             Canvas canvas = canvasObject.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.sortingOrder = 500;
+            canvas.sortingOrder = order;
 
-            lowHealthImage = MakeFullScreenImage(canvasObject.transform, new Color(0.6f, 0f, 0f, 0f));
-            hurtImage = MakeFullScreenImage(canvasObject.transform, new Color(0.8f, 0f, 0f, 0f));
-            fadeImage = MakeFullScreenImage(canvasObject.transform, new Color(0f, 0f, 0f, 1f));
-        }
-
-        static Image MakeFullScreenImage(Transform parent, Color color)
-        {
-            GameObject go = new GameObject("Overlay");
-            go.transform.SetParent(parent, false);
-            Image image = go.AddComponent<Image>();
-            image.color = color;
+            GameObject imageObject = new GameObject("Overlay");
+            imageObject.transform.SetParent(canvasObject.transform, false);
+            Image image = imageObject.AddComponent<Image>();
             image.raycastTarget = false;
             RectTransform rect = image.rectTransform;
             rect.anchorMin = Vector2.zero;
@@ -65,20 +70,32 @@ namespace AetherRealm
         void Update()
         {
             float deltaTime = Time.unscaledDeltaTime;
+            pulse += deltaTime * 3f;
 
-            hurtAlpha = Mathf.MoveTowards(hurtAlpha, 0f, deltaTime * 2f);
-            hurtImage.color = new Color(0.8f, 0f, 0f, hurtAlpha * 0.5f);
+            hitAmount = Mathf.MoveTowards(hitAmount, 0f, deltaTime * 6f);
 
-            float lowHealthTarget = lowHealth ? 0.3f : 0f;
-            Color c = lowHealthImage.color;
-            c.a = Mathf.MoveTowards(c.a, lowHealthTarget, deltaTime * 0.5f);
-            lowHealthImage.color = c;
+            float lowPulse = lowHealth ? (0.09f + 0.04f * Mathf.Sin(pulse)) : 0f;
+            float red = Mathf.Max(hitAmount * 0.13f, lowPulse);
+            redImage.color = new Color(0.7f, 0.05f, 0.05f, red);
 
-            fadeAlpha = Mathf.MoveTowards(fadeAlpha, fadeTarget, deltaTime / 0.6f);
-            fadeImage.color = new Color(0f, 0f, 0f, fadeAlpha);
+            fadeAmount = Mathf.MoveTowards(fadeAmount, fadeTarget, deltaTime / 0.6f);
+            fadeImage.color = new Color(0f, 0f, 0f, fadeAmount);
         }
 
-        public static void FlashHurt() { Instance.hurtAlpha = 1f; }
+        // for the CI diagnostic
+        public string DebugState()
+        {
+            return "redA=" + redImage.color.a.ToString("F2") +
+                   " fadeA=" + fadeImage.color.a.ToString("F2") +
+                   " lowHealth=" + lowHealth + " hitAmount=" + hitAmount.ToString("F2");
+        }
+
+        public static string Debug()
+        {
+            return instance != null ? instance.DebugState() : "(no ScreenEffects)";
+        }
+
+        public static void FlashHurt() { if (Instance.hitAmount < 0.3f) Instance.hitAmount = 1f; }
         public static void SetLowHealth(bool on) { Instance.lowHealth = on; }
         public static void FadeIn() { Instance.fadeTarget = 0f; }
         public static void FadeOut() { Instance.fadeTarget = 1f; }

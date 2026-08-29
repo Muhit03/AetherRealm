@@ -67,6 +67,17 @@ namespace AetherRealm
             wall.transform.position = position;
             wall.transform.localScale = size;
             wall.GetComponent<Renderer>().sharedMaterial = Palette.Material(Palette.Stone);
+            BlockNavMesh(wall);
+        }
+
+        // Marks an obstacle so the NavMesh bake treats its surfaces (including the
+        // top) as "not walkable". Without this the enemies could get stranded on
+        // top of a wall or pillar.
+        static void BlockNavMesh(GameObject obstacle)
+        {
+            NavMeshModifier modifier = obstacle.AddComponent<NavMeshModifier>();
+            modifier.overrideArea = true;
+            modifier.area = 1; // 1 = Not Walkable
         }
 
         static void BuildPillarsAndTorches(Transform parent)
@@ -87,6 +98,7 @@ namespace AetherRealm
                 pillar.transform.position = corner + Vector3.up * 3.5f;
                 pillar.transform.localScale = new Vector3(2f, 3.5f, 2f);
                 pillar.GetComponent<Renderer>().sharedMaterial = Palette.Material(Palette.Stone);
+                BlockNavMesh(pillar);
 
                 Torch.Create(corner + Vector3.up * 4.5f);
             }
@@ -114,6 +126,7 @@ namespace AetherRealm
                 block.transform.localScale = new Vector3(3.5f, 1.8f, 1f);
                 block.transform.rotation = Quaternion.Euler(0f, Random.Range(0f, 180f), 0f);
                 block.GetComponent<Renderer>().sharedMaterial = Palette.Material(Palette.StoneDark);
+                BlockNavMesh(block);
 
                 layout.coverPoints.Add(spot);
             }
@@ -124,10 +137,10 @@ namespace AetherRealm
             // Kept well inside the walls so the enemies land on the baked NavMesh.
             Vector3[] positions =
             {
-                new Vector3(0f, 0f, 17f),
-                new Vector3(0f, 0f, -17f),
-                new Vector3(17f, 0f, 0f),
-                new Vector3(-17f, 0f, 0f)
+                new Vector3(0f, 0f, 15f),
+                new Vector3(0f, 0f, -15f),
+                new Vector3(15f, 0f, 0f),
+                new Vector3(-15f, 0f, 0f)
             };
 
             foreach (Vector3 position in positions)

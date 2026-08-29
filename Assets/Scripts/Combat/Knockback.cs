@@ -36,6 +36,16 @@ namespace AetherRealm
             if (agent != null && agent.enabled && agent.isOnNavMesh)
             {
                 agent.Move(step);
+                // don't let a shove push the agent off the walkable floor
+                if (!agent.isOnNavMesh)
+                {
+                    NavMeshHit hit;
+                    if (NavMesh.SamplePosition(transform.position, out hit, 8f, NavMesh.AllAreas))
+                    {
+                        agent.Warp(hit.position);
+                    }
+                    velocity = Vector3.zero;
+                }
             }
             else if (characterController != null && characterController.enabled)
             {

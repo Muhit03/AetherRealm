@@ -88,14 +88,43 @@ public class EnemyController : MonoBehaviour, IDamageable
         agent.speed = moveSpeed;
         agent.stoppingDistance = 0f;
 
-        // The spawn portals sit near the wall - make sure we land on the NavMesh.
-        if (NavMesh.SamplePosition(transform.position, out NavMeshHit navHit, 12f, NavMesh.AllAreas))
-        {
-            agent.Warp(navHit.position);
-        }
+        PlaceOnNavMesh();
 
         BuildBody();
         ChangeState(new SpawnState());
+    }
+
+    // Makes sure the enemy actually stands on the walkable floor and can path
+    // towards the player. If the spawn point is bad (on a ledge, off the mesh)
+    // it drops the enemy on a clear spot nearer the middle of the arena.
+    void PlaceOnNavMesh()
+    {
+        Vector3 wanted = transform.position;
+
+        NavMeshHit hit;
+        if (NavMesh.SamplePosition(wanted, out hit, 3f, NavMesh.AllAreas))
+        {
+            agent.Warp(hit.position);
+        }
+
+        // Can we reach the middle of the arena from here?
+        NavMeshPath path = new NavMeshPath();
+        bool reachable = agent.isOnNavMesh &&
+                         agent.CalculatePath(Vector3.zero, path) &&
+                         path.status == NavMeshPathStatus.PathComplete;
+
+        if (!reachable)
+        {
+            for (int tries = 0; tries < 12; tries++)
+            {
+                Vector3 guess = new Vector3(UnityEngine.Random.Range(-9f, 9f), 0f, UnityEngine.Random.Range(-9f, 9f));
+                if (NavMesh.SamplePosition(guess, out hit, 4f, NavMesh.AllAreas))
+                {
+                    agent.Warp(hit.position);
+                    break;
+                }
+            }
+        }
     }
 
     // WaveManager calls this to make later waves harder.
@@ -155,6 +184,17 @@ public class EnemyController : MonoBehaviour, IDamageable
         {
             attackTimer -= Time.deltaTime;
         }
+
+        // if a shove knocked us off the walkable area, hop back on
+        if (agent != null && agent.enabled && !agent.isOnNavMesh)
+        {
+            NavMeshHit hit;
+            if (NavMesh.SamplePosition(transform.position, out hit, 12f, NavMesh.AllAreas))
+            {
+                agent.Warp(hit.position);
+            }
+        }
+
         if (currentState != null)
         {
             currentState.Tick(this);
@@ -178,13 +218,34 @@ public class EnemyController : MonoBehaviour, IDamageable
     }
 
     // ---- movement helpers the states use ----
+    Vector3 lastDestination;
+    float repathTimer;
+
     public void SetDestination(Vector3 target)
     {
-        if (agent != null && agent.isOnNavMesh)
+        if (agent == null || !agent.isOnNavMesh)
         {
-            agent.isStopped = false;
-            agent.SetDestination(target);
+            return;
         }
+        agent.isStopped = false;
+
+        // don't recompute the path every single frame - only when the target
+        // moved a bit or a fraction of a second passed
+        repathTimer -= Time.deltaTime;
+        if (repathTimer > 0f && (target - lastDestination).sqrMagnitude < 2.25f)
+        {
+            return;
+        }
+        repathTimer = 0.2f;
+
+        // pull the target onto the walkable floor so the path is always valid
+        NavMeshHit hit;
+        if (NavMesh.SamplePosition(target, out hit, 4f, NavMesh.AllAreas))
+        {
+            target = hit.position;
+        }
+        lastDestination = target;
+        agent.SetDestination(target);
     }
 
     public void MoveTowardsPlayer()
@@ -203,7 +264,7 @@ public class EnemyController : MonoBehaviour, IDamageable
         {
             return;
         }
-        Vector3 offset = Quaternion.Euler(0f, surroundAngle, 0f) * Vector3.forward * (attackRange * 0.8f);
+        Vector3 offset = Quaternion.Euler(0f, surroundAngle, 0f) * Vector3.forward * (attackRange * 0.95f);
         SetDestination(Player.position + offset);
     }
 

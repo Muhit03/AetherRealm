@@ -8,7 +8,7 @@ using AetherRealm;
 /// </summary>
 public class Warrior : PlayerController
 {
-    public int armour = 6;
+    public int armour = 4;
     public int bashDamage = 26;
     public float bashRadius = 3.4f;
 
