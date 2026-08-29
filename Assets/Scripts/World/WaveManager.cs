@@ -68,9 +68,20 @@ public class WaveManager : MonoBehaviour
         running = true;
         yield return new WaitForSeconds(2f);
 
-        for (currentWave = 1; currentWave <= totalWaves; currentWave++)
+        // a resumed run starts on its saved wave instead of wave 1
+        int startWave = GameManager.Instance != null ? GameManager.Instance.ResumeWave : 1;
+        if (startWave < 1) startWave = 1;
+        wavesCleared = startWave - 1;
+
+        for (currentWave = startWave; currentWave <= totalWaves; currentWave++)
         {
             bool isBossWave = (currentWave == totalWaves);
+
+            // checkpoint: from wave 2 on, save so a death here can be resumed
+            if (currentWave >= 2 && GameManager.Instance != null)
+            {
+                GameManager.Instance.SaveCheckpoint(currentWave);
+            }
 
             if (HUDController.Instance != null)
             {

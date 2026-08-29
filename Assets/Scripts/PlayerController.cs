@@ -486,6 +486,15 @@ public class PlayerController : MonoBehaviour, IDamageable, ISaveable
         playerId = id;
     }
 
+    // Used when a saved run is resumed: put the gold back and start the
+    // checkpoint wave at full health, with no pop-up text.
+    public void RestoreProgress(int savedGold)
+    {
+        gold = savedGold;
+        currentHealth = MaxHealth;
+        UpdateHud();
+    }
+
     void UpdateHud()
     {
         if (HUDController.Instance == null)

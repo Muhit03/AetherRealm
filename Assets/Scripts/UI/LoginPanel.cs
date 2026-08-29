@@ -15,6 +15,9 @@ public class LoginPanel : MonoBehaviour
     string _class = "Warrior";
     Button _warriorBtn, _mageBtn;
 
+    GameObject _resumeGroup;
+    TMP_Text _resumeInfo;
+
     public void Build()
     {
         var root = (RectTransform)transform;
@@ -56,7 +59,38 @@ public class LoginPanel : MonoBehaviour
         _status = UIFactory.Label(card.transform, "", 26, TextAlignmentOptions.Center);
         UIFactory.At(_status.rectTransform, new Vector2(0.5f, 0f), new Vector2(0f, 110f), new Vector2(680f, 60f));
 
+        BuildResumeGroup(card.transform);
+
         SelectClass("Warrior");
+    }
+
+    // A little cover panel that appears after login when the account has a run
+    // in progress: continue it, or throw it away and start fresh.
+    void BuildResumeGroup(Transform card)
+    {
+        var g = UIFactory.Box(card, "ResumeGroup", UIFactory.Panel);
+        UIFactory.Stretch(g.rectTransform);
+
+        var title = UIFactory.Label(g.transform, "RUN IN PROGRESS", 40, TextAlignmentOptions.Center);
+        UIFactory.At(title.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -120f), new Vector2(640f, 50f));
+        title.color = UIFactory.Accent;
+
+        _resumeInfo = UIFactory.Label(g.transform, "", 28, TextAlignmentOptions.Center);
+        UIFactory.At(_resumeInfo.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -210f), new Vector2(640f, 120f));
+
+        var cont = UIFactory.Button(g.transform, "CONTINUE", () => GameBootstrap.Instance.BeginRunResume(), new Vector2(380f, 76f));
+        UIFactory.At((RectTransform)cont.transform, new Vector2(0.5f, 0.5f), new Vector2(0f, 30f), new Vector2(380f, 76f));
+
+        var fresh = UIFactory.Button(g.transform, "START A NEW RUN", () =>
+        {
+            RunSave.Clear();
+            UIManager.Instance.ShowHUD();
+            GameBootstrap.Instance.BeginRun(AuthManager.CurrentClassType);
+        }, new Vector2(380f, 76f));
+        UIFactory.At((RectTransform)fresh.transform, new Vector2(0.5f, 0.5f), new Vector2(0f, -70f), new Vector2(380f, 76f));
+
+        _resumeGroup = g.gameObject;
+        _resumeGroup.SetActive(false);
     }
 
     void SelectClass(string c)
@@ -118,6 +152,17 @@ public class LoginPanel : MonoBehaviour
         }
         _status.text = msg;
         _status.color = new Color(0.5f, 1f, 0.6f);
+        _resumeGroup.SetActive(false);
+
+        // if this account left a run unfinished, let them pick it up
+        if (RunSave.Has())
+        {
+            _resumeInfo.text = "You have a run at Wave " + RunSave.SavedWave() +
+                               ".\nContinue where you left off, or start over?";
+            _resumeGroup.SetActive(true);
+            return;
+        }
+
         UIManager.Instance.ShowHUD();
         GameBootstrap.Instance.BeginRun(AuthManager.CurrentClassType);
     }

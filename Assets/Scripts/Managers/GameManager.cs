@@ -19,10 +19,16 @@ public class GameManager : MonoBehaviour
     public event Action<int> ScoreChanged;
     public event Action<int> KillsChanged;
 
+    // When the player picks "Continue", the scene reloads to clear everything
+    // out. A static field survives a scene load, so the fresh GameManager reads
+    // this and picks the run back up from the saved checkpoint.
+    public static bool ResumeRequested;
+
     int score;
     int kills;
     int damageDealt;
     float startTime;
+    int resumeWave = 1;
     RunState state = RunState.Menu;
 
     PlayerController player;
@@ -35,6 +41,7 @@ public class GameManager : MonoBehaviour
     public int SecondsPlayed { get { return Mathf.FloorToInt(Time.time - startTime); } }
     public bool IsPlaying { get { return state == RunState.Playing; } }
     public bool IsGameOver { get { return state == RunState.Lost || state == RunState.Won; } }
+    public int ResumeWave { get { return resumeWave; } }
 
     void Awake()
     {
@@ -55,12 +62,36 @@ public class GameManager : MonoBehaviour
     public void StartRun(PlayerController hero)
     {
         player = hero;
-        score = 0;
-        kills = 0;
-        damageDealt = 0;
-        startTime = Time.time;
+
+        // Are we carrying on from a saved checkpoint?
+        RunSave.Data saved = default(RunSave.Data);
+        bool resuming = false;
+        if (ResumeRequested && RunSave.TryLoad(out saved))
+        {
+            resuming = true;
+        }
+        ResumeRequested = false;
+
+        if (resuming)
+        {
+            score = saved.score;
+            kills = saved.kills;
+            damageDealt = saved.damage;
+            startTime = Time.time - saved.seconds;   // keep the run timer going
+            resumeWave = saved.wave;
+            upgradeLevels = saved.upgrades;
+        }
+        else
+        {
+            score = 0;
+            kills = 0;
+            damageDealt = 0;
+            startTime = Time.time;
+            resumeWave = 1;
+            upgradeLevels.Clear();
+        }
+
         state = RunState.Playing;
-        upgradeLevels.Clear();
         Effects.ResetCounters();
 
         if (ScoreChanged != null) ScoreChanged(score);
@@ -70,12 +101,47 @@ public class GameManager : MonoBehaviour
         {
             player.SetPlayerId(AuthManager.CurrentPlayerId);
             ApplyUpgrades();
+            if (resuming)
+            {
+                player.RestoreProgress(saved.gold);   // gold back, full health
+            }
         }
 
         if (HUDController.Instance != null)
         {
             HUDController.Instance.ShowPlayerInfo(player);
         }
+    }
+
+    // Called by WaveManager at the start of each wave (from wave 2 on). Writes a
+    // checkpoint so the player can carry on from this wave later.
+    public void SaveCheckpoint(int wave)
+    {
+        if (!AuthManager.IsLoggedIn || player == null)
+        {
+            return;
+        }
+
+        RunSave.Data d = new RunSave.Data();
+        d.wave = wave;
+        d.gold = player.Gold;
+        d.score = score;
+        d.kills = kills;
+        d.damage = damageDealt;
+        d.seconds = SecondsPlayed;
+        d.className = player.ClassName;
+        d.upgrades = upgradeLevels;
+        RunSave.Write(d);
+    }
+
+    // "Continue" from the end screen: reload the scene and let StartRun pick the
+    // run back up from the checkpoint.
+    public void ContinueFromCheckpoint()
+    {
+        ResumeRequested = true;
+        Time.timeScale = 1f;
+        ScreenEffects.FadeOut();
+        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
     }
 
     public void RegisterKill(int scoreForKill)
@@ -165,6 +231,7 @@ public class GameManager : MonoBehaviour
         if (won)
         {
             score += 1000;
+            RunSave.Clear();   // the run is finished - nothing to carry on from
         }
 
         SaveRunToLeaderboard();
@@ -198,6 +265,8 @@ public class GameManager : MonoBehaviour
     public void Restart()
     {
         if (IsPlaying) { state = RunState.Lost; SaveRunToLeaderboard(); }
+        RunSave.Clear();          // "play again" / "restart" is a fresh run
+        ResumeRequested = false;
         Time.timeScale = 1f;
         ScreenEffects.FadeOut();
         SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);

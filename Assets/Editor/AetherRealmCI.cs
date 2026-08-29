@@ -26,7 +26,8 @@ public static class AetherRealmCI
     static bool runStarted;
     static double runStartedAt;
 
-    static bool shot1Done, shot2Done, shot3Done;
+    static bool shot1Done, shot2Done, shot3Done, shot4Done, shot5Done;
+    static bool runSaveRoundTrips;
     static bool enemyDumpDone;
     static bool leaderboardOpened;
     static bool runEnded;
@@ -253,16 +254,30 @@ public static class AetherRealmCI
             }
         }
 
-        // 18s in: open the leaderboard and screenshot it
-        if (since > 18.0 && !leaderboardOpened)
+        // 17.6s in: screenshot the end screen on its own (before the leaderboard
+        // covers it) so we can eyeball the layout
+        if (since > 17.6 && !shot4Done) { shot4Done = true; Shot("4_endscreen.png"); CheckRunSave(); }
+
+        // 18.3s in: fake a checkpoint and re-show the end screen so we can also
+        // eyeball the layout WITH the CONTINUE button, then clear it again
+        if (since > 18.3 && !shot5Done)
+        {
+            shot5Done = true;
+            FakeCheckpointAndReshow();
+            Shot("5_endscreen_continue.png");
+            AetherRealm.RunSave.Clear();
+        }
+
+        // 19s in: open the leaderboard and screenshot it
+        if (since > 19.0 && !leaderboardOpened)
         {
             leaderboardOpened = true;
             if (UIManager.Instance != null) UIManager.Instance.ToggleLeaderboard();
         }
-        if (since > 19.0 && !shot2Done) { shot2Done = true; Shot("2_leaderboard.png"); DumpUi(); }
-        if (since > 21.0 && !shot3Done) { shot3Done = true; Shot("3_final.png"); }
+        if (since > 20.0 && !shot2Done) { shot2Done = true; Shot("2_leaderboard.png"); DumpUi(); }
+        if (since > 22.0 && !shot3Done) { shot3Done = true; Shot("3_final.png"); }
 
-        if (since > 22.0 || t > 120.0) Finish();
+        if (since > 23.0 || t > 120.0) Finish();
     }
 
     static float lastAttack;
@@ -355,6 +370,56 @@ public static class AetherRealmCI
         Debug.Log("CI ENEMY DUMP:\n" + enemyReport);
     }
 
+    // Round-trips a checkpoint through RunSave (PlayerPrefs) to prove the
+    // save/continue feature serialises and reloads correctly.
+    static void CheckRunSave()
+    {
+        try
+        {
+            var upgrades = new System.Collections.Generic.Dictionary<string, int> { { "health", 2 }, { "damage", 1 } };
+            var write = new AetherRealm.RunSave.Data
+            {
+                wave = 5, gold = 123, score = 999, kills = 7,
+                damage = 400, seconds = 88, className = "Mage", upgrades = upgrades
+            };
+            AetherRealm.RunSave.Write(write);
+
+            AetherRealm.RunSave.Data back;
+            bool ok = AetherRealm.RunSave.TryLoad(out back)
+                      && back.wave == 5 && back.gold == 123 && back.score == 999
+                      && back.kills == 7 && back.damage == 400 && back.className == "Mage"
+                      && back.upgrades.ContainsKey("health") && back.upgrades["health"] == 2
+                      && back.upgrades.ContainsKey("damage") && back.upgrades["damage"] == 1;
+
+            AetherRealm.RunSave.Clear();
+            ok = ok && !AetherRealm.RunSave.TryLoad(out back);
+
+            runSaveRoundTrips = ok;
+            Debug.Log("CI RUNSAVE: round-trip " + (ok ? "OK" : "FAILED"));
+        }
+        catch (Exception e)
+        {
+            Debug.Log("CI RUNSAVE: threw " + e.Message);
+        }
+    }
+
+    static void FakeCheckpointAndReshow()
+    {
+        try
+        {
+            var write = new AetherRealm.RunSave.Data
+            {
+                wave = 4, gold = 220, score = 500, kills = 13, damage = 896, seconds = 55,
+                className = "Warrior",
+                upgrades = new System.Collections.Generic.Dictionary<string, int>()
+            };
+            AetherRealm.RunSave.Write(write);
+            if (UIManager.Instance != null && UIManager.Instance.endScreen != null)
+                UIManager.Instance.endScreen.Show(false, 500, 13, 3);
+        }
+        catch (Exception e) { Debug.Log("CI reshow threw " + e.Message); }
+    }
+
     static void DumpUi()
     {
         var canvases = UnityEngine.Object.FindObjectsByType<Canvas>(FindObjectsInactive.Include);
@@ -439,6 +504,7 @@ public static class AetherRealmCI
         r.AppendLine("  player: startHp=" + playerStartHp + " lowestHp=" + playerLowestHp + " mageMadeBolts=" + mageMadeBolts);
         ok &= Check(r, "Mage basic attack fires projectiles (ranged, not melee)", mageMadeBolts);
         ok &= Check(r, "player loses health when swarmed", playerLowestHp >= 0 && playerLowestHp < playerStartHp);
+        ok &= Check(r, "checkpoint save/continue round-trips through PlayerPrefs", runSaveRoundTrips);
 
         if (errors.Length > 0)
         {
@@ -454,6 +520,7 @@ public static class AetherRealmCI
         // put the real local leaderboard back
         PlayerPrefs.SetString("local_scores", SessionState.GetString("AetherRealmCI.Scores", ""));
         PlayerPrefs.DeleteKey("local_user_ci_hero");
+        PlayerPrefs.DeleteKey("run_save_ci_hero");
         PlayerPrefs.Save();
 
         EditorApplication.isPlaying = false;

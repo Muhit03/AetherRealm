@@ -59,7 +59,18 @@ public class GameBootstrap : MonoBehaviour
         PreparePlayer();
 
         GameManager.Instance.GoToMenu();
-        Debug.Log("AetherRealm is ready. Log in to start playing.");
+
+        // If the player chose "Continue" on the end screen, the scene reloaded
+        // and we jump straight back into the run instead of the menu.
+        if (GameManager.ResumeRequested && AuthManager.IsLoggedIn && RunSave.Has())
+        {
+            BeginRun(AuthManager.CurrentClassType);
+        }
+        else
+        {
+            GameManager.ResumeRequested = false;
+            Debug.Log("AetherRealm is ready. Log in to start playing.");
+        }
     }
 
     // The original grey-box scene has a broken plane and a leftover goblin.
@@ -231,6 +242,15 @@ public class GameBootstrap : MonoBehaviour
 
         playerObject.transform.position = arena.playerStart;
         playerObject.SetActive(false);
+    }
+
+    // Called by the login screen when the player picks "Continue" on a saved
+    // run. No scene reload is needed - the scene is already fresh.
+    public void BeginRunResume()
+    {
+        GameManager.ResumeRequested = true;
+        if (UIManager.Instance != null) UIManager.Instance.ShowHUD();
+        BeginRun(AuthManager.CurrentClassType);
     }
 
     // Called by the login screen once a class is chosen.
